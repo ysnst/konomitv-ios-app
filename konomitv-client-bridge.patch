@@ -1,0 +1,136 @@
+# iOS ラッパーアプリとの橋渡し (konomitv-client-bridge)
+#
+# 発端: ユーザー決定 (2026-11-22)。iPhone では Safari/PWA の擬似フルスクリーンではなく、
+# WKWebView の薄いラッパーアプリ (KonomiTV-iOS、User-Agent の印は KonomiTV-iOS) で使う。
+# アプリ側は ~/workspace/konomitv-ios-app/ (このパッチと同じ置き場)。
+#
+# 注意: これは「案」のパッチである。基準は kc ツリー
+# (~/workspace/konomitv-work/kc/client/src/...) で、本番の現行ファイルとは
+# 既に差分があることが分かっている (kc は本番より古い変更状態を含む)。
+# 本番へ当てる前に、実機投入フェーズで本番前提 (パッチチェーン適用済みツリー) と
+# 突き合わせてから当て直すこと。このファイルのまま本番へ当ててはいけない。
+#
+# 対応 (2ファイル):
+# 1. PlayerController.ts の setupFullscreenHandler (1579行目〜):
+# UA に KonomiTV-iOS が含まれる場合は、Fullscreen API も擬似フルスクリーンも使わず、
+# アプリ側のメッセージハンドラ (名前 konomiNative) へ
+# {type: 'fullscreen', enter: true/false} を送るだけにする。
+# 全画面の実体 (ステータスバーを隠す・OS ごと横向きにする) はアプリ側が担う。
+# 状態の保持には、この関数の中だけで使う is_native_fullscreen を足す。
+# isFullScreen() の既存の判定 (擬似 or ブラウザ全画面) だけではアプリ全画面を
+# 拾えず、全画面ボタンの押し直しが効かなくなるためである。
+# あわせて player_store.is_fullscreen はアプリ側でも true にし、
+# Watch.vue 側の「全画面中」の見た目 (ヘッダーを隠す等) が従来どおり効くようにする。
+# is_pseudo_fullscreen は立てない (立てると Watch.vue が画面回転やパネル非表示など
+# 擬似フルスクリーン専用の扱いを始めてしまうため)。
+# 2. DocumentPiPManager.ts の init() (61行目〜):
+# Document Picture-in-Picture が無い環境では従来どおり何もしないのが原則だが、
+# iOS アプリ内ではその分岐の中で、WebKit 独自の PiP
+# (webkitSetPresentationMode('picture-in-picture')) への橋渡しを足す。
+# DPlayer の PiP ボタンが呼ぶ video.requestPictureInPicture() を補う形にし、
+# 画質切り替えで映像要素が差し替わるたびに付け直す (quality_end)。
+# 標準の requestPictureInPicture は iOS の WebKit には無いため、この補いが無いと
+# PiP ボタンが無反応になる見込み (DPlayer 側がボタンの表示自体を
+# document.pictureInPictureEnabled で判断している場合は、ボタンが出ない可能性が残る。
+# その場合はネイティブ全画面の再生画面にある iOS 標準の PiP ボタン、
+# または再生中にアプリを離れた際の自動 PiP が代替経路になる。いずれも実機確認待ち)。
+#
+# 適用先: client/src/services/player/PlayerController.ts
+# client/src/services/player/managers/DocumentPiPManager.ts
+# 適用後は client/ で yarn lint; yarn typecheck と、npm/yarn スクリプト経由のビルドで確認すること。
+# 本番反映はユーザーのゴーサインと実機投入フェーズでの突き合わせの後 (このパッチ単体では当てない)。
+--- a/client/src/services/player/PlayerController.ts
++++ b/client/src/services/player/PlayerController.ts
+@@ -1584,6 +1584,18 @@
+         // 再初期化で残ったイベントを解除し、現在のプレイヤーだけを操作する
+         this.fullscreen_handler_cleanup?.();
+ 
++        // iOS ラッパーアプリ (UA に KonomiTV-iOS) の中では、ブラウザの全画面 API も
++        // 擬似フルスクリーンも使わず、アプリ側へ開始・終了を通知して、
++        // ステータスバーの非表示と OS ごとの横向き切り替えをアプリに任せる (ローカル改造・案)
++        const is_ios_app = navigator.userAgent.includes('KonomiTV-iOS');
++        let is_native_fullscreen = false;
++        const post_native_fullscreen = (enter: boolean) => {
++            const handler = (window as any).webkit?.messageHandlers?.konomiNative;
++            if (handler) {
++                handler.postMessage({type: 'fullscreen', enter: enter});
++            }
++        };
++
+         // 動画だけをネイティブ全画面へ移すと字幕・コメントが失われるため、
+         // API が使えない場合は既存のプレイヤー DOM 全体を CSS で広げる
+         const enter_pseudo_fullscreen = () => {
+@@ -1597,7 +1609,7 @@
+ 
+         // フルスクリーンかどうか
+         this.player.fullScreen.isFullScreen = (type?: DPlayerType.FullscreenType) => {
+-            return player_store.is_pseudo_fullscreen || !!(document.fullscreenElement || document.webkitFullscreenElement);
++            return is_native_fullscreen || player_store.is_pseudo_fullscreen || !!(document.fullscreenElement || document.webkitFullscreenElement);
+         };
+ 
+         // フルスクリーンをリクエスト
+@@ -1608,6 +1620,13 @@
+                 this.player.fullScreen.cancel();
+                 return;
+             }
++            // iOS アプリ内ではアプリ側へ通知するだけ (全画面の実体はアプリ側)
++            if (is_ios_app) {
++                is_native_fullscreen = true;
++                player_store.is_fullscreen = true;
++                post_native_fullscreen(true);
++                return;
++            }
+             // フルスクリーンをリクエスト
+             // Safari は webkit のベンダープレフィックスが必要
+             const request_fullscreen = fullscreen_container.requestFullscreen || fullscreen_container.webkitRequestFullscreen;
+@@ -1634,6 +1653,13 @@
+ 
+         // フルスクリーンをキャンセル
+         this.player.fullScreen.cancel = (type?: DPlayerType.FullscreenType) => {
++            // iOS アプリ内ではアプリ側へ終了を通知するだけ
++            if (is_ios_app) {
++                is_native_fullscreen = false;
++                player_store.is_fullscreen = false;
++                post_native_fullscreen(false);
++                return;
++            }
+             // 擬似全画面ではネイティブ API を呼ばず、表示状態だけを戻す
+             if (player_store.is_pseudo_fullscreen) {
+                 player_store.is_pseudo_fullscreen = false;
+--- a/client/src/services/player/managers/DocumentPiPManager.ts
++++ b/client/src/services/player/managers/DocumentPiPManager.ts
+@@ -63,6 +63,34 @@
+ 
+         // Document Picture-in-Picture API がサポートされていない場合は何もしない
+         if (('documentPictureInPicture' in window) === false) {
++            // iOS ラッパーアプリ内では、WebKit 独自の PiP への橋渡しだけを足す (ローカル改造・案)
++            // 標準の requestPictureInPicture() は iOS の WebKit には無いため、
++            // DPlayer の PiP ボタンが呼ぶ先を webkitSetPresentationMode() で補う
++            if (navigator.userAgent.includes('KonomiTV-iOS')) {
++                const install_webkit_pip_bridge = (video: HTMLVideoElement) => {
++                    const video_any = video as any;
++                    if (typeof video_any.webkitSupportsPresentationMode !== 'function'
++                        || video_any.webkitSupportsPresentationMode('picture-in-picture') === false
++                        || typeof video_any.webkitSetPresentationMode !== 'function') {
++                        return;
++                    }
++                    video_any.requestPictureInPicture = async () => {
++                        // すでに PiP 中なら通常表示に戻し、そうでなければ PiP を開始する
++                        const next_mode = video_any.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
++                        video_any.webkitSetPresentationMode(next_mode);
++                        return {} as PictureInPictureWindow;  // 呼び出し側は戻り値を使わないため形だけ合わせる
++                    };
++                };
++                install_webkit_pip_bridge(this.player.video);
++                // 画質切り替え後は映像要素が差し替わるため、付け直す
++                this.player.on('quality_end', () => {
++                    if (this.player && this.player.video) {
++                        install_webkit_pip_bridge(this.player.video);
++                    }
++                });
++                console.log('[DocumentPiPManager] Initialized. (WebKit Picture-in-Picture bridge for iOS app.)');
++                return;
++            }
+             console.log('[DocumentPiPManager] Initialized. (Document Picture-in-Picture API is not supported.)');
+             return;
+         }
