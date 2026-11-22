@@ -51,6 +51,16 @@ jobs:
           zip -r KonomiTV-iOS-unsigned.ipa Payload
           ls -lh KonomiTV-iOS-unsigned.ipa
 
+      # upload-artifact はファイルの更新時刻を世界標準時の壁時計として zip に書くため、
+      # タイムゾーンを日本時間にしても解凍時の表示は世界標準時のままだった（2026-11-22 実機で確認）。
+      # そこで梱包直前に IPA の更新時刻そのものを9時間進め、
+      # 世界標準時として書かれても日本時間の数字に見えるようにする。
+      - name: Shift IPA timestamp +9h for artifact zip
+        run: |
+          touch -t $(date -v+9H +%Y%m%d%H%M.%S) build/KonomiTV-iOS-unsigned.ipa
+          ls -l build/KonomiTV-iOS-unsigned.ipa
+          date
+
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
