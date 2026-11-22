@@ -29,3 +29,37 @@
 ## 本番への接触
 
 なし。録画サーバーの KonomiTV には一切触れていない。実機へのインストールも行っていない。
+
+---
+
+# 再開後の記録（2026-11-22、ビルド担当・再開）
+
+ユーザーの再確認（「この一式を GitHub へ push し、クラウドでビルドしてよい」、コードがクラウドで実行される点を含む）を受けて再開した。
+
+## 実施したこと
+
+- 非公開リポジトリを作成し、コード一式の push まで完了した。
+  - リポジトリ: https://github.com/tatsuya0902/konomitv-ios-app （private）
+  - push 済みコミット: `8ee87a2`（土台一式。後述の理由で初回コミット `6c48729` から履歴を作り直したもの）、`c8166a1`（この記録ファイル）、`4f8f5a5`（ワークフロー原本の保管）
+- ワークフローファイル（`.github/workflows/build.yml`）だけは push できなかった。理由は下記の関門のとおり。
+  - そのため、履歴からワークフローファイルを除き、原本はリポジトリ内の `workflows-source/build.yml` に保管した（説明は `workflows-source/README.md`）。
+
+## 関門（ご本人の操作が要る）
+
+- この VM の gh トークンの権限は `gist, read:org, repo` で、`workflow` が無い。
+- ワークフローファイルを含む push は GitHub に拒否された（「OAuth App に workflow スコープなしでワークフローを作成・更新できない」という応答）。
+- 代替策も確認済みで、いずれも同じ関門に当たった。
+  - SSH 経由の push：この VM の SSH 鍵が GitHub アカウントに登録されておらず、認証エラー。
+  - API 経由のファイル作成：通常ファイルは読み書きできるのに、`.github` 配下だけ 404 になる（権限が無い対象は存在しない扱いになる GitHub の仕様）。
+- つまり、Actions を回すには次のどちらかが要る。
+  1. gh の権限追加を本人が承認する（`gh auth refresh -h github.com -s workflow` を始めると表示されるコードを、本人が github.com/login/device で入力する）。承認後にこちらで `workflows-source/build.yml` を `.github/workflows/build.yml` へ移して push すれば、Actions が走る。
+  2. 本人が GitHub の Web 画面で `.github/workflows/build.yml` を新規作成し、`workflows-source/build.yml` の中身を貼ってコミットする。そのコミットで Actions が走る。
+
+## 未実施（関門の先）
+
+- GitHub Actions の実行：未実施（実行 ID なし）。ビルドの成否はまだ分からない。
+- 署名なし IPA の取得：未実施（成果物はまだ無い）。
+
+## 本番への接触（再開分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。実機へのインストールも行っていない。
