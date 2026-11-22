@@ -125,3 +125,38 @@
 ## 本番への接触（不具合修正分）
 
 なし。録画サーバーの KonomiTV には一切触れていない。
+
+---
+
+# 表示修正：ステータスバーとヘッダーの重なり（2026-11-22）
+
+## 発端
+
+アプリは LiveContainer で起動し、KonomiTV のトップ画面と番組データの表示まで実機確認できた（成功）。その上でユーザーから新しい指摘：通常画面で iOS のステータスバー（時計・電波・電池）が KonomiTV のヘッダー（ロゴや検索アイコンの行）に重なって表示される。
+
+## 裏取り結果
+
+- ViewController.swift の viewDidLoad で、WKWebView の制約が view の四辺ぴったり（topAnchor = view.topAnchor 等）になっており、安全領域（safe area）を無視していた。Web ページの先頭がステータスバーの下に潜る作りで、原因は親担当の読みどおり確定。
+- isNativeFullscreen の didSet は、ステータスバーとホームインジケーターの更新だけで、制約の切り替えはしていなかった。
+- ステータスバーの帯の地の色に使う #1e1310 は、KonomiTV client 側の vuetify テーマ 'background': '#1e1310'（client/src/plugins/vuetify.ts）と一致することを確認した。
+
+## 直した内容
+
+- ViewController.swift のみ変更（コミット `f2f0d45`）：
+  - 通常時：WebView の上端を view.safeAreaLayoutGuide.topAnchor に合わせる制約へ変更。左右・下端は従来どおり画面端（下端は実機表示で問題が出ていないため触らない）。横向きの通常時も安全領域に追従する。
+  - 全画面時（isNativeFullscreen = true）：従来どおり上端まで広げる。制約は通常用と全画面用の2組を保持し、isNativeFullscreen の didSet から activate/deactivate で切り替えるようにした。
+  - view.backgroundColor を黒からテーマ背景色 #1e1310 へ変更し、ステータスバーの帯がページと同化して見えるようにした。WebView 自体の背景色は現状維持。
+
+## ビルドと IPA
+
+- GitHub Actions 実行 ID `44971597880`：**成功**（全ステップ通過。直し直しの再実行は不要だった）。
+- 新しい署名なし IPA を gh run download で取得し、build-output/KonomiTV-iOS-unsigned.ipa を差し替えた（28,318 バイト。差し替え前は 27,684 バイト）。
+- 新しい IPA を展開して確認済み：前回の修正（CFBundleExecutable = KonomiTV-iOS）も維持されている。
+
+## 残っていること
+
+- 実機で重なりが解消したかは、ユーザーの次の試行待ち。こちらでは実機確認はしていない。
+
+## 本番への接触（表示修正分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。
