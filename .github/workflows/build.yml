@@ -14,9 +14,19 @@ jobs:
   build:
     name: Build unsigned IPA
     runs-on: macos-latest
+    # 成果物 zip に記録される時刻がビルド機の現地時刻（世界標準時）の壁時計になり、
+    # 解凍したときに日本時間とずれて見えるのを防ぐため、ジョブ全体を日本時間にする。
+    env:
+      TZ: Asia/Tokyo
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set timezone to Asia/Tokyo
+        run: |
+          sudo systemsetup -settimezone "Asia/Tokyo"
+          systemsetup -gettimezone
+          date
 
       - name: Show Xcode version
         run: xcodebuild -version
