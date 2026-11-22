@@ -8,7 +8,7 @@ import WebKit
 /// 1. WebView の設定 (インライン再生・PiP 許可・User-Agent の印)
 /// 2. Web 側からの全画面の通知を受けて、ステータスバーを隠すこと
 ///    (縦向きから入る場合だけ、OS ごと横向きにする。既に横向きなら回さない)
-/// 3. 開く URL の読み取り (設定アプリで変更可)
+/// 3. 開く URL の読み取り (未設定ならアプリ内で入力画面を出し、設定アプリでも変更可)
 ///
 /// 全画面について:
 /// Safari と違い、このアプリにはブラウザの UI が無い。残るのは iOS のステータスバーだけなので、
@@ -18,9 +18,6 @@ import WebKit
 final class ViewController: UIViewController {
 
     // MARK: - 定数
-
-    /// 既定で開く KonomiTV (テレビ用ラッパーと同じ既定値)
-    private static let defaultURLString = "https://192-168-100-6.local.konomi.tv:7000/"
 
     /// 設定アプリ側の項目キー (Settings.bundle/Root.plist と一致させる)
     private static let urlDefaultsKey = "konomi_url"
@@ -81,6 +78,10 @@ final class ViewController: UIViewController {
 
     /// WebView の URL 変化の監視 (視聴ページを離れたときの全画面終了の保険に使う)。
     private var urlObservation: NSKeyValueObservation?
+
+    /// URL 未設定のときに出す入力画面と、その入力欄 (必要なときに組み立てる)。
+    private var urlInputView: UIView?
+    private var urlTextField: UITextField?
 
     // MARK: - ステータスバーと向き
 
@@ -168,7 +169,7 @@ final class ViewController: UIViewController {
             self?.exitFullscreenIfLeftWatchPage()
         }
 
-        loadHome()
+        loadHomeOrShowURLInput()
     }
 
     /// 向きと全画面かどうかで、WebView の制約の組を切り替える。
@@ -232,8 +233,12 @@ final class ViewController: UIViewController {
         // 表示時点の大きさで、制約の組が向きに合っていることを確かめる
         // (横向きで起動した場合などの取りこぼし防止)
         updateWebViewConstraints()
-        // 設定アプリで URL を変えて戻ってきたら、新しい URL を開き直す
-        if let current = Self.homeURLString(), current != lastLoadedURLString, lastLoadedURLString != nil {
+        // 設定アプリで URL を変えて戻ってきたら、新しい URL を開き直す。
+        // 空に変えられていたら、入力画面を出す。
+        if Self.homeURLString() == nil {
+            showURLInput()
+        } else if let current = Self.homeURLString(), current != lastLoadedURLString {
+            hideURLInput()
             loadHome()
         }
     }
@@ -249,22 +254,131 @@ final class ViewController: UIViewController {
 
     // MARK: - URL の読み込み
 
-    /// 設定アプリで変更された URL があればそれを、無ければ既定値を返す。
+    /// 保存されている URL を返す。未設定 (保存値が無い・空) なら nil。
+    /// 既定の URL は持たない。初めて使うときは、入力画面で入れてもらう。
     /// バンドル ID はサイドロードの再署名で変わりうるため、URL はアプリの作りには組み込まず、
     /// 標準の UserDefaults (設定バンドル経由) から毎回読む。
     private static func homeURLString() -> String? {
-        let saved = UserDefaults.standard.string(forKey: urlDefaultsKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let saved, !saved.isEmpty {
-            return saved
+        guard let saved = UserDefaults.standard.string(forKey: urlDefaultsKey) else { return nil }
+        return normalizedURLString(saved)
+    }
+
+    /// 入力された URL を整える。前後の空白を取り除き、方式 (https:// 等) が
+    /// 付いていなければ https:// を補う。空なら nil (保存しない)。
+    private static func normalizedURLString(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.contains("://") ? trimmed : "https://" + trimmed
+    }
+
+    /// 保存されている URL があれば開き、無ければ入力画面を出す。
+    private func loadHomeOrShowURLInput() {
+        if Self.homeURLString() != nil {
+            hideURLInput()
+            loadHome()
+        } else {
+            showURLInput()
         }
-        return defaultURLString
     }
 
     private func loadHome() {
         guard let urlString = Self.homeURLString(), let url = URL(string: urlString) else { return }
         lastLoadedURLString = urlString
         webView.load(URLRequest(url: url))
+    }
+
+    // MARK: - URL の入力画面
+
+    /// URL の入力画面を出す。必要なときにだけ組み立てる。
+    /// 設定アプリ側で入れられた値があれば、それを入力欄の初期値として見せる。
+    private func showURLInput() {
+        if urlInputView == nil {
+            buildURLInputView()
+        }
+        urlTextField?.text = UserDefaults.standard.string(forKey: Self.urlDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let urlInputView {
+            urlInputView.isHidden = false
+            view.bringSubviewToFront(urlInputView)
+        }
+    }
+
+    private func hideURLInput() {
+        urlInputView?.isHidden = true
+    }
+
+    /// 入力画面は、案内文・入力欄・「開く」ボタンだけの簡素な作りにする。
+    /// 地の色は通常画面と同じテーマ色に合わせる。
+    private func buildURLInputView() {
+        let container = UIView()
+        container.backgroundColor = view.backgroundColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = UILabel()
+        titleLabel.text = "KonomiTV の URL を入力してください"
+        titleLabel.textColor = .white
+        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let textField = UITextField()
+        textField.placeholder = "https://..."
+        textField.textColor = .white
+        textField.backgroundColor = UIColor.white.withAlphaComponent(0.12)
+        textField.layer.cornerRadius = 8
+        textField.keyboardType = .URL
+        textField.autocapitalizationType = .none
+        textField.autocorrectionType = .no
+        textField.returnKeyType = .go
+        textField.clearButtonMode = .whileEditing
+        textField.translatesAutoresizingMaskIntoConstraints = false
+        textField.addTarget(self, action: #selector(openEnteredURL), for: .editingDidEndOnExit)
+
+        let openButton = UIButton(type: .system)
+        openButton.setTitle("開く", for: .normal)
+        openButton.setTitleColor(.white, for: .normal)
+        openButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        openButton.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        openButton.layer.cornerRadius = 8
+        openButton.translatesAutoresizingMaskIntoConstraints = false
+        openButton.addTarget(self, action: #selector(openEnteredURL), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, textField, openButton])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        view.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            textField.heightAnchor.constraint(equalToConstant: 44),
+            openButton.heightAnchor.constraint(equalToConstant: 44),
+        ])
+
+        urlInputView = container
+        urlTextField = textField
+    }
+
+    /// 入力された URL を保存して、そのまま開く。
+    /// 空なら保存せず、入力画面のままにする。
+    @objc private func openEnteredURL() {
+        guard let text = urlTextField?.text,
+              let normalized = Self.normalizedURLString(text),
+              URL(string: normalized) != nil else {
+            return
+        }
+        urlTextField?.resignFirstResponder()
+        UserDefaults.standard.set(normalized, forKey: Self.urlDefaultsKey)
+        print("[KonomiTV-iOS] URL saved from input screen")
+        hideURLInput()
+        loadHome()
     }
 
     // MARK: - 全画面の開始・終了

@@ -12,7 +12,7 @@
 			<key>Title</key>
 			<string>接続先</string>
 			<key>FooterText</key>
-			<string>空欄の場合は既定の KonomiTV を開きます。変更はアプリに戻ったときに反映されます。</string>
+			<string>空欄にすると、アプリの起動時に URL の入力画面が出ます。変更はアプリに戻ったときに反映されます。</string>
 		</dict>
 		<dict>
 			<key>Type</key>
