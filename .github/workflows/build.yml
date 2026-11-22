@@ -77,6 +77,10 @@ jobs:
       # 成果物 zip は解凍すると IPA の時刻が世界標準時の数字で出て不便だったため、
       # 取り方の本線は「固定タグのリリースに IPA をそのまま置く」形に切り替えた（2026-11-22）。
       # 毎回のビルドで同じリリースの中身（IPA と説明）を差し替える。
+      # IPA のファイル名には版番号が入るため、--clobber では名前違いの古い IPA が
+      # 差し替わらずに残ってしまう。置く前に既存の IPA 資産をすべて消し、
+      # 常に「最新の IPA が1つだけ」になるようにする（2026-11-22）。
+      # Source code の自動資産は .ipa で終わらないので、この削除には掛からない。
       - name: Publish IPA to fixed release
         if: github.event_name != 'pull_request'
         env:
@@ -93,5 +97,9 @@ jobs:
           else
             gh release create "$TAG" --title "最新の試作用IPA" --notes "$NOTES" --prerelease
           fi
+          gh release view "$TAG" --json assets --jq '.assets[].name | select(endswith(".ipa"))' | while IFS= read -r asset; do
+            echo "Deleting old IPA asset: $asset"
+            gh release delete-asset "$TAG" "$asset"
+          done
           gh release upload "$TAG" "$IPA" --clobber
           gh release view "$TAG"
