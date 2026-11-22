@@ -63,3 +63,30 @@
 ## 本番への接触（再開分）
 
 なし。録画サーバーの KonomiTV には一切触れていない。実機へのインストールも行っていない。
+
+---
+
+# 最終段階の記録（2026-11-22、ビルド担当・最終段階）
+
+ユーザーがデバイスコードで承認し、gh トークンに workflow 権限が追加された（scopes: gist, read:org, repo, workflow。担当側でも実測確認）ため、関門は解消し、残りを実施した。
+
+## 実施したこと
+
+- `workflows-source/build.yml` を本来の場所 `.github/workflows/build.yml` へ配置してコミット・push した（コミット `043d6cb`）。workflows-source 側の保管と説明はそのまま残してある。
+- GitHub Actions の実行結果：
+  - 1回目（実行 ID `44970685755`）：失敗。ジョブが1秒で取り消された。理由はアノテーション「The configuration 'macos-14-arm64-us-xl' is not supported」で、指定した `macos-14` ランナー構成が未対応だったため。
+  - 直した点：`runs-on` を `macos-14` から `macos-latest` へ変更（`.github/workflows/build.yml` と `workflows-source/build.yml` の両方。コミット `c9e197b`）。
+  - 2回目（実行 ID `44970711568`）：**成功**。全ステップ（チェックアウト、Xcode バージョン表示、署名なしビルド、IPA のパッケージ、成果物のアップロード）が通過した。所要はジョブ約19秒。コード自体（Swift・プロジェクト設定）の修正は不要だった。
+- 成果物（署名なし IPA）の取得確認：
+  - `gh run download` で実際に取得できた。置き場所：`~/workspace/konomitv-ios-app/build-output/KonomiTV-iOS-unsigned.ipa`（27,644 バイト）。
+  - 中身を確認済み：`Payload/KonomiTV-iOS.app` が入っており、実行ファイル `KonomiTV-iOS`（Mach-O 64-bit arm64、約129KB）、Info.plist、Assets.car、Settings.bundle、PkgInfo が揃っている。
+  - Actions 側にも成果物 `KonomiTV-iOS-unsigned-ipa` として残っている。
+
+## 残っていること（この担当の範囲外）
+
+- 実機へのインストール（無料サイドロード）と実機での動作確認は未実施。ビルドが通ったことと、実機で動くことは別である。
+- AppIcon は未投入のまま（ビルドは警告なしで通過したが、アイコン画像自体はまだ無い）。
+
+## 本番への接触（最終段階分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。実機へのインストールも行っていない。
