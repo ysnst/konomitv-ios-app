@@ -34,13 +34,21 @@ final class ViewController: UIViewController {
 
     private var webView: WKWebView!
 
-    /// ネイティブ全画面中かどうか。ステータスバーとホームインジケーターの表示が連動する。
+    /// ネイティブ全画面中かどうか。ステータスバーとホームインジケーターの表示、
+    /// それに WebView の制約 (通常時か全画面時か) が連動する。
     private var isNativeFullscreen = false {
         didSet {
             setNeedsStatusBarAppearanceUpdate()
             setNeedsUpdateOfHomeIndicatorAutoHidden()
+            updateWebViewConstraints()
         }
     }
+
+    /// 通常時の WebView の制約 (上端は安全領域に合わせる)
+    private var normalConstraints: [NSLayoutConstraint] = []
+
+    /// ネイティブ全画面時の WebView の制約 (上端まで画面いっぱいに広げる)
+    private var fullscreenConstraints: [NSLayoutConstraint] = []
 
     /// 最後に読み込んだ URL。設定で URL が変わっていたら読み直すために保持する。
     private var lastLoadedURLString: String?
@@ -67,7 +75,9 @@ final class ViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        // 安全領域 (ステータスバーの帯) の地の色は、KonomiTV のテーマ背景色 (#1e1310、
+        // client 側の vuetify テーマ 'background') に合わせ、帯がページと同化して見えるようにする
+        view.backgroundColor = UIColor(red: 0x1E / 255, green: 0x13 / 255, blue: 0x10 / 255, alpha: 1)
 
         let configuration = WKWebViewConfiguration()
         // 映像をページの中でそのまま再生する (iPhone 標準の動画だけ全画面にしない)
@@ -92,15 +102,42 @@ final class ViewController: UIViewController {
         webView.allowsBackForwardNavigationGestures = false
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
+        // 制約は通常用と全画面用の2組を用意し、全画面の切り替えに合わせて入れ替える。
+        // 違いは上端だけで、左右・下端はどちらの組でも画面端まで広げる
+        // (下端は現在の実機表示で問題が出ていないため触らない)。
+        normalConstraints = [
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ]
+        fullscreenConstraints = [
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        ])
+        ]
+        NSLayoutConstraint.activate(normalConstraints)
         self.webView = webView
 
         loadHome()
+    }
+
+    /// 全画面かどうかで WebView の制約を切り替える。
+    /// 通常時は上端を安全領域に合わせる。KonomiTV のページはブラウザ表示前提で
+    /// ステータスバー分の余白を持っていないため、画面の上端にそのまま貼ると
+    /// ヘッダー (ロゴや検索アイコンの行) が時計・電波・電池の表示に重なってしまう。
+    /// 横向きの通常時も、ノッチやステータスバーの扱いは安全領域に任せれば追従できる。
+    /// 全画面時はステータスバー自体が消えるので、上端まで広げてよい。
+    private func updateWebViewConstraints() {
+        guard !normalConstraints.isEmpty, !fullscreenConstraints.isEmpty else { return }
+        if isNativeFullscreen {
+            NSLayoutConstraint.deactivate(normalConstraints)
+            NSLayoutConstraint.activate(fullscreenConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(fullscreenConstraints)
+            NSLayoutConstraint.activate(normalConstraints)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
