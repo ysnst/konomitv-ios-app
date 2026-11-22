@@ -45,11 +45,20 @@ final class ViewController: UIViewController {
         }
     }
 
-    /// 通常時の WebView の制約 (上端は安全領域に合わせる)
-    private var normalConstraints: [NSLayoutConstraint] = []
+    // WebView の各辺の制約。辺ごとに「安全領域に合わせるもの」と「画面端に
+    // 合わせるもの」の両方を用意し、向きと全画面かどうかで使う組を切り替える
+    // (updateWebViewConstraints を参照)。
+    private var topSafeConstraint: NSLayoutConstraint!
+    private var topEdgeConstraint: NSLayoutConstraint!
+    private var bottomSafeConstraint: NSLayoutConstraint!
+    private var bottomEdgeConstraint: NSLayoutConstraint!
+    private var leadingSafeConstraint: NSLayoutConstraint!
+    private var leadingEdgeConstraint: NSLayoutConstraint!
+    private var trailingSafeConstraint: NSLayoutConstraint!
+    private var trailingEdgeConstraint: NSLayoutConstraint!
 
-    /// ネイティブ全画面時の WebView の制約 (四辺とも安全領域の内側に置く)
-    private var fullscreenConstraints: [NSLayoutConstraint] = []
+    /// 現在有効にしている制約の組 (同じ組なら入れ替えないための記録)
+    private var appliedConstraints: [NSLayoutConstraint] = []
 
     /// この回の全画面で、入るときに画面の回転を行ったかどうか。
     /// 画面が既に横向きのときに入った場合は回転していないので、終了時も
@@ -121,27 +130,25 @@ final class ViewController: UIViewController {
         webView.allowsBackForwardNavigationGestures = false
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
-        // 制約は通常用と全画面用の2組を用意し、全画面の切り替えに合わせて入れ替える。
-        // 通常用は上端だけ安全領域に合わせ、他は画面端まで広げる。
-        // 全画面用は四辺とも安全領域の内側に置く。横向きでは WebView を端まで
-        // 広げると、端まで広がったメニューやボタンがダイナミックアイランドや
-        // 下のバーに被ってしまうため (映像そのものは 16:9 で左右に余白が
-        // できるので被らない。被るのは UI 側)。縦向きの通常時と同じ考え方で、
-        // 安全領域に任せればノッチ側・下端とも自動で避けられる。
-        normalConstraints = [
-            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        ]
-        fullscreenConstraints = [
-            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-        ]
-        NSLayoutConstraint.activate(normalConstraints)
+        // 制約は辺ごとに「安全領域」と「画面端」の2種類を用意し、向きと
+        // 全画面かどうかで使う組を切り替える (updateWebViewConstraints)。
+        // 横向きでは、左端から出てくるメニュー (サイドバー) がダイナミック
+        // アイランドと重なって不便なため、左右だけ安全領域に合わせる。
+        // 安全領域の余白は実質アイランドのある側にしか無いので、結果として
+        // アイランド側だけが内側に入り、反対側は端まで使える。上下は画面端
+        // まで使い、映像の高さは縮めない (2026-11-22 のユーザーの指定)。
+        // 縦向きは従来どおりで、通常時は上端だけ安全領域、全画面時は四辺とも
+        // 安全領域に合わせる。
+        topSafeConstraint = webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+        topEdgeConstraint = webView.topAnchor.constraint(equalTo: view.topAnchor)
+        bottomSafeConstraint = webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        bottomEdgeConstraint = webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        leadingSafeConstraint = webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor)
+        leadingEdgeConstraint = webView.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        trailingSafeConstraint = webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor)
+        trailingEdgeConstraint = webView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         self.webView = webView
+        updateWebViewConstraints()
 
         // 端末の物理的な向きの監視を始める (全画面終了後の許可向きの復帰判定に使う)。
         // 縦向きロックの状態はアプリからは読めないため、代わりに端末の姿勢そのものを見る。
@@ -162,27 +169,48 @@ final class ViewController: UIViewController {
         loadHome()
     }
 
-    /// 全画面かどうかで WebView の制約を切り替える。
-    /// 通常時は上端を安全領域に合わせる。KonomiTV のページはブラウザ表示前提で
-    /// ステータスバー分の余白を持っていないため、画面の上端にそのまま貼ると
-    /// ヘッダー (ロゴや検索アイコンの行) が時計・電波・電池の表示に重なってしまう。
-    /// 横向きの通常時も、ノッチやステータスバーの扱いは安全領域に任せれば追従できる。
-    /// 全画面時は四辺とも安全領域の内側に置き、横向きでメニューやボタンが
-    /// ダイナミックアイランドや下のバーに被らないようにする。安全領域の外に
-    /// 出る余白は、ビューの背景色 (KonomiTV のテーマ色) で埋まる。
-    private func updateWebViewConstraints() {
-        guard !normalConstraints.isEmpty, !fullscreenConstraints.isEmpty else { return }
-        if isNativeFullscreen {
-            NSLayoutConstraint.deactivate(normalConstraints)
-            NSLayoutConstraint.activate(fullscreenConstraints)
+    /// 向きと全画面かどうかで、WebView の制約の組を切り替える。
+    ///
+    /// 組の選び方:
+    /// - 横向き (通常時・全画面時とも): 左右は安全領域に合わせ、上下は画面端
+    ///   まで使う。安全領域の左右の余白は実質ダイナミックアイランドのある側
+    ///   にしか無いため、アイランド側だけがその分だけ内側に入り、左端から
+    ///   出てくるメニューがアイランドに被らなくなる。反対側は端まで使え、
+    ///   上下を端まで使うので映像の高さも縮まない。
+    /// - 縦向き・通常時: 上端だけ安全領域に合わせ、他は画面端まで使う。
+    ///   KonomiTV のページはブラウザ表示前提でステータスバー分の余白を持って
+    ///   いないため、上端をそのまま貼るとヘッダー (ロゴや検索アイコンの行)
+    ///   が時計・電波・電池の表示に重なってしまうため。
+    /// - 縦向き・全画面時: 四辺とも安全領域の内側に置く (従来どおり)。
+    /// 安全領域の外に出る余白は、ビューの背景色 (KonomiTV のテーマ色) で埋まる。
+    ///
+    /// 呼び出しの機会は、構築時 (viewDidLoad)、全画面の切り替え時
+    /// (isNativeFullscreen の didSet)、画面表示時 (viewWillAppear)、回転時
+    /// (viewWillTransition。回転後の大きさが渡されるので、それで向きを
+    /// 判定する) の4箇所。同じ組になるときは何もしない。
+    private func updateWebViewConstraints(for size: CGSize? = nil) {
+        guard topSafeConstraint != nil else { return }
+        let targetSize = size ?? view.bounds.size
+        let selected: [NSLayoutConstraint]
+        if targetSize.width > targetSize.height {
+            selected = [topEdgeConstraint, bottomEdgeConstraint, leadingSafeConstraint, trailingSafeConstraint]
+        } else if isNativeFullscreen {
+            selected = [topSafeConstraint, bottomSafeConstraint, leadingSafeConstraint, trailingSafeConstraint]
         } else {
-            NSLayoutConstraint.deactivate(fullscreenConstraints)
-            NSLayoutConstraint.activate(normalConstraints)
+            selected = [topSafeConstraint, bottomEdgeConstraint, leadingEdgeConstraint, trailingEdgeConstraint]
         }
+        guard selected != appliedConstraints else { return }
+        NSLayoutConstraint.deactivate(appliedConstraints)
+        NSLayoutConstraint.activate(selected)
+        appliedConstraints = selected
+        print("[KonomiTV-iOS] WebView constraints updated: landscape=\(targetSize.width > targetSize.height), fullscreen=\(isNativeFullscreen)")
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // 表示時点の大きさで、制約の組が向きに合っていることを確かめる
+        // (横向きで起動した場合などの取りこぼし防止)
+        updateWebViewConstraints()
         // 設定アプリで URL を変えて戻ってきたら、新しい URL を開き直す
         if let current = Self.homeURLString(), current != lastLoadedURLString, lastLoadedURLString != nil {
             loadHome()
@@ -384,6 +412,8 @@ final class ViewController: UIViewController {
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
+        // 回転後の大きさに合わせて、制約の組を新しい向きのものへ切り替える
+        updateWebViewConstraints(for: size)
         coordinator.animate(alongsideTransition: nil) { _ in
             if self.isNativeFullscreen {
                 // 横向きへ移り終えたら、許可向きを横向きの組 (左右両方) へ広げる。
