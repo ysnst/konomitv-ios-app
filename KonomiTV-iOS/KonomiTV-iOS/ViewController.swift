@@ -180,13 +180,43 @@ final class ViewController: UIViewController {
             AppDelegate.orientationLock = .landscape
             requestLandscape()
         } else {
-            // 終了時は固定を外すだけにする。広い向きの組をそのまま OS に要求すると
-            // 断られるため、許可向きの再評価だけを促し、実際の回転は端末の向きに任せる。
-            AppDelegate.orientationLock = .allButUpsideDown
-            if #available(iOS 16.0, *) {
-                setNeedsUpdateOfSupportedInterfaceOrientations()
-            } else {
-                UIViewController.attemptRotationToDeviceOrientation()
+            // 終了時は、開始時と対称に、縦向きへの切り替え自体を OS に頼む。
+            // 許可向きを広げるだけでは、いちど横向きに切り替えた画面は縦へ戻らない
+            // (2026-11-22 実機で確認: 終了の合図は届き、ステータスバーや制約は戻るのに、
+            // 向きだけ横のまま残った)。縦へ戻り終えたら通常時の許可向きに戻す
+            // (viewWillTransition で検知する)。
+            AppDelegate.orientationLock = .portrait
+            requestPortrait()
+        }
+    }
+
+    /// ウィンドウシーンの向き切り替えを OS に頼み、縦向きにする。
+    /// 全画面の終了時に使う。縦へ戻ったあとの許可向きの復帰は viewWillTransition が担う。
+    private func requestPortrait() {
+        if #available(iOS 16.0, *) {
+            guard let scene = view.window?.windowScene else { return }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { error in
+                print("[KonomiTV-iOS] Geometry update (portrait) rejected: \(error)")
+            }
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+        } else {
+            UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+            UIViewController.attemptRotationToDeviceOrientation()
+        }
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // 全画面の終了で縦向きへ戻り終えたら、通常時の許可向き (縦・横の両方) に戻す。
+        // 戻し忘れると、通常画面でも縦に固定されたままになる。
+        if !isNativeFullscreen && size.height >= size.width && AppDelegate.orientationLock != .allButUpsideDown {
+            coordinator.animate(alongsideTransition: nil) { _ in
+                AppDelegate.orientationLock = .allButUpsideDown
+                if #available(iOS 16.0, *) {
+                    self.setNeedsUpdateOfSupportedInterfaceOrientations()
+                } else {
+                    UIViewController.attemptRotationToDeviceOrientation()
+                }
             }
         }
     }
