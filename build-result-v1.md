@@ -197,3 +197,39 @@
 ## 本番への接触（アプリアイコン分）
 
 なし。録画サーバーの KonomiTV には一切触れていない。
+
+---
+
+# ビルド記録 v1 追記（2026-11-22、全画面の終了時に縦へ戻らない問題の修正）
+
+## 発端
+
+実機で「全画面から戻ろうとしても、ステータスバーや周りの表示は戻るのに画面の向きだけ横のまま残る」という報告があった（2026-11-22）。原因はアプリ側の全画面終了処理で、終了時は許可向きを広げるだけで、縦向きへの切り替え自体を OS へ要求していなかったこと。
+
+## 変更内容
+
+- 対象は `KonomiTV-iOS/KonomiTV-iOS/ViewController.swift` のみ（親担当が編集、ビルド担当が git diff で内容を確認してからコミットした。想定外の変更は混ざっていなかった）。
+  - 終了時は許可向きを `.portrait` にし、新設した `requestPortrait()` で開始時と対称に縦向きへの切り替えを OS へ要求する（iOS 16 以降は `requestGeometryUpdate`、未満は従来手法）。
+  - `viewWillTransition` を追加し、縦へ戻り終えたら通常時の許可向き（`.allButUpsideDown`）へ復帰させる（戻し忘れると通常画面でも縦固定になるため）。
+
+## 実施したこと
+
+- 上記の変更をコミット `8bcc988` で push した。
+- GitHub Actions 実行 ID `44976163915`：**成功**（全ステップ通過。再実行は不要だった）。
+
+## 新しい IPA と基本項目の確認
+
+- 署名なし IPA を gh run download で取得し、build-output/KonomiTV-iOS-unsigned.ipa を差し替えた（145,500 バイト。前回は 144,622 バイト）。
+- 展開した .app で実物確認済み：
+  - CFBundleExecutable = KonomiTV-iOS（実行ファイルは arm64 の Mach-O で存在）。
+  - 表示名 CFBundleDisplayName = KonomiTV、バージョン 0.1 / 1 を維持。
+  - アイコン：CFBundleIcons が AppIcon を指し、AppIcon60x60@2x.png と AppIcon76x76@2x~ipad.png が生成されている。
+  - 今回の直しの目印（"Geometry update (portrait)" の文字列）が実行ファイルに含まれることを確認した。
+
+## 残っていること
+
+- 実機で全画面から縦へ戻れるかは、ユーザーの次の試行待ち。こちらでは実機確認はしていない。
+
+## 本番への接触（今回分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。
