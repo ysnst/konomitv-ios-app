@@ -1,0 +1,49 @@
+name: Build (unsigned IPA)
+
+# 試作の本線は「署名なし IPA を作り、本人の無料 Apple ID でサイドロード時に署名する」流れ。
+# このワークフローは署名を一切しない (証明書・プロファイルは使わない)。
+# 有料プランでの TestFlight 配布は、将来このファイルとは別のワークフローに分ける。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build (no code signing)
+        run: |
+          xcodebuild build \
+            -project KonomiTV-iOS/KonomiTV-iOS.xcodeproj \
+            -scheme KonomiTV-iOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/DerivedData/Build/Products/Release-iphoneos/KonomiTV-iOS.app" build/Payload/
+          cd build
+          zip -r KonomiTV-iOS-unsigned.ipa Payload
+          ls -lh KonomiTV-iOS-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: KonomiTV-iOS-unsigned-ipa
+          path: build/KonomiTV-iOS-unsigned.ipa
+          if-no-files-found: error
