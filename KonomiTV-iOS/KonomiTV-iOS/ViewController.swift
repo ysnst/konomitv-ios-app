@@ -127,8 +127,9 @@ final class ViewController: UIViewController {
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
-        // アプリ内で完結させるため、スワイプでの戻る/進むは無効にする
-        webView.allowsBackForwardNavigationGestures = false
+        // 画面端からの横スワイプで戻る/進む操作を使えるようにする
+        // (視聴画面から録画一覧へ戻るため。2026-11-22 のユーザーの要望)
+        webView.allowsBackForwardNavigationGestures = true
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
         // 制約は辺ごとに「安全領域」と「画面端」の2種類を用意し、向きと
