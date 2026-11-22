@@ -6,7 +6,8 @@ import WebKit
 ///
 /// 担うのは次の3点だけ (それ以外は KonomiTV 側の作りに任せる):
 /// 1. WebView の設定 (インライン再生・PiP 許可・User-Agent の印)
-/// 2. Web 側からの全画面の通知を受けて、ステータスバーを隠し、OS ごと横向きにすること
+/// 2. Web 側からの全画面の通知を受けて、ステータスバーを隠すこと
+///    (縦向きから入る場合だけ、OS ごと横向きにする。既に横向きなら回さない)
 /// 3. 開く URL の読み取り (設定アプリで変更可)
 ///
 /// 全画面について:
@@ -47,8 +48,14 @@ final class ViewController: UIViewController {
     /// 通常時の WebView の制約 (上端は安全領域に合わせる)
     private var normalConstraints: [NSLayoutConstraint] = []
 
-    /// ネイティブ全画面時の WebView の制約 (上端まで画面いっぱいに広げる)
+    /// ネイティブ全画面時の WebView の制約 (四辺とも安全領域の内側に置く)
     private var fullscreenConstraints: [NSLayoutConstraint] = []
+
+    /// この回の全画面で、入るときに画面の回転を行ったかどうか。
+    /// 画面が既に横向きのときに入った場合は回転していないので、終了時も
+    /// 回転まわりの後処理はせず、ステータスバーを出し直すだけでよい。
+    /// 保険 (URL 監視) で終了させる場合も、この値で後処理を分ける。
+    private var enteredWithRotation = false
 
     /// 最後に読み込んだ URL。設定で URL が変わっていたら読み直すために保持する。
     private var lastLoadedURLString: String?
@@ -115,8 +122,12 @@ final class ViewController: UIViewController {
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
         // 制約は通常用と全画面用の2組を用意し、全画面の切り替えに合わせて入れ替える。
-        // 違いは上端だけで、左右・下端はどちらの組でも画面端まで広げる
-        // (下端は現在の実機表示で問題が出ていないため触らない)。
+        // 通常用は上端だけ安全領域に合わせ、他は画面端まで広げる。
+        // 全画面用は四辺とも安全領域の内側に置く。横向きでは WebView を端まで
+        // 広げると、端まで広がったメニューやボタンがダイナミックアイランドや
+        // 下のバーに被ってしまうため (映像そのものは 16:9 で左右に余白が
+        // できるので被らない。被るのは UI 側)。縦向きの通常時と同じ考え方で、
+        // 安全領域に任せればノッチ側・下端とも自動で避けられる。
         normalConstraints = [
             webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -124,10 +135,10 @@ final class ViewController: UIViewController {
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ]
         fullscreenConstraints = [
-            webView.topAnchor.constraint(equalTo: view.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
         ]
         NSLayoutConstraint.activate(normalConstraints)
         self.webView = webView
@@ -156,7 +167,9 @@ final class ViewController: UIViewController {
     /// ステータスバー分の余白を持っていないため、画面の上端にそのまま貼ると
     /// ヘッダー (ロゴや検索アイコンの行) が時計・電波・電池の表示に重なってしまう。
     /// 横向きの通常時も、ノッチやステータスバーの扱いは安全領域に任せれば追従できる。
-    /// 全画面時はステータスバー自体が消えるので、上端まで広げてよい。
+    /// 全画面時は四辺とも安全領域の内側に置き、横向きでメニューやボタンが
+    /// ダイナミックアイランドや下のバーに被らないようにする。安全領域の外に
+    /// 出る余白は、ビューの背景色 (KonomiTV のテーマ色) で埋まる。
     private func updateWebViewConstraints() {
         guard !normalConstraints.isEmpty, !fullscreenConstraints.isEmpty else { return }
         if isNativeFullscreen {
@@ -215,19 +228,43 @@ final class ViewController: UIViewController {
             return
         }
         print("[KonomiTV-iOS] Fullscreen signal applied: enter=\(enter)")
-        isNativeFullscreen = enter
         if enter {
             isOrientationRestorePending = false
-            enterLandscape()
+            // 開始時点で画面が既に横向きかどうかで、入り方を分ける。
+            // 既に横向きなら、端末を横にして開いて右の情報パネルを隠すだけで
+            // 映像はほぼ画面いっぱいになっており、全画面のために回す必要は
+            // ない (2026-11-22 の実機確認)。この場合は回転の要求も許可向きの
+            // 変更も一切せず、ステータスバーを隠すだけにする。回転しなかった
+            // ことは enteredWithRotation に残し、終了時の後処理を分ける。
+            let current = view.window?.windowScene?.interfaceOrientation
+            if let current, current.isLandscape {
+                enteredWithRotation = false
+                isNativeFullscreen = true
+                print("[KonomiTV-iOS] Enter fullscreen: already landscape, status bar only (no rotation)")
+            } else {
+                enteredWithRotation = true
+                isNativeFullscreen = true
+                enterLandscape()
+            }
         } else {
-            exitToPortrait()
+            let rotated = enteredWithRotation
+            enteredWithRotation = false
+            isNativeFullscreen = false
+            if rotated {
+                exitToPortrait()
+            } else {
+                // 回転して入っていないので、戻す回転も要らない。
+                // ステータスバーを出し直すだけでよい (isNativeFullscreen の
+                // 変更で連動済み)。許可向きの復帰保留も立てない。
+                print("[KonomiTV-iOS] Exit fullscreen: no rotation was used, status bar only")
+            }
         }
     }
 
-    /// 全画面の開始: 目標の横向きを1つ決め、まずその一方向だけを許可して回す。
+    /// 全画面の開始 (縦向きから入る場合): 目標の横向きを1つ決め、
+    /// まずその一方向だけを許可して回す。
     ///
     /// 目標の決め方 (2026-11-22 のユーザーの希望に合わせた仕様):
-    /// - 画面が既に横向きなら、その側を維持する。
     /// - 端末が物理的に横向きなら、その姿勢に対応する側にする。
     /// - それ以外 (縦持ち・机に置いている等) は、決まった一方向
     ///   (充電口が右側に来る向き = landscapeRight) にする。
@@ -237,16 +274,8 @@ final class ViewController: UIViewController {
     /// 返したときにも追従できるようにする (viewWillTransition で検知)。
     /// 縦向きロック中は iOS 自体が回転を止めるため、入った一方向に留まる
     /// (ロックの状態自体はアプリからは読めないが、結果として体感が一致する)。
+    /// 画面が既に横向きの場合はここ自体が呼ばれない (setNativeFullscreen 参照)。
     private func enterLandscape() {
-        let current = view.window?.windowScene?.interfaceOrientation
-        if let current, current.isLandscape {
-            // 既に横向きの画面で全画面に入る場合は、回す必要がない。
-            // 許可向きを横向きの組にして、左右どちらへも追従できるようにする。
-            AppDelegate.orientationLock = .landscape
-            print("[KonomiTV-iOS] Enter fullscreen: already landscape, lock=.landscape")
-            refreshSupportedOrientations()
-            return
-        }
         let target = targetLandscapeOrientation()
         AppDelegate.orientationLock = Self.mask(for: target)
         requestGeometryUpdate(to: target, label: "enter landscape", retryOnFailure: false)
@@ -268,7 +297,9 @@ final class ViewController: UIViewController {
         }
     }
 
-    /// 全画面の終了: 縦向きへの切り替えを OS に頼み、許可向きの復帰は保留する。
+    /// 全画面の終了 (回して入った場合): 縦向きへの切り替えを OS に頼み、
+    /// 許可向きの復帰は保留する。回さずに入った場合はここ自体が呼ばれず、
+    /// ステータスバーを出し直すだけで終わる (setNativeFullscreen 参照)。
     ///
     /// 許可向きを広げるだけでは、いちど横向きに切り替えた画面は縦へ戻らない
     /// (2026-11-22 実機で確認)。そのため開始時と対称に、縦向きへの切り替え
@@ -357,7 +388,10 @@ final class ViewController: UIViewController {
             if self.isNativeFullscreen {
                 // 横向きへ移り終えたら、許可向きを横向きの組 (左右両方) へ広げる。
                 // 全画面中に端末をひっくり返しても追従できるようにするため。
-                if size.width > size.height, AppDelegate.orientationLock != .landscape {
+                // ただし、回して入った場合だけ。既に横向きで回さずに入った
+                // 場合は許可向きを一切変えない約束なので、ここでも触らない
+                // (全画面中に端末を回して大きさが変わっても同様)。
+                if self.enteredWithRotation, size.width > size.height, AppDelegate.orientationLock != .landscape {
                     AppDelegate.orientationLock = .landscape
                     print("[KonomiTV-iOS] Orientation lock widened to landscape (both sides)")
                     self.refreshSupportedOrientations()
