@@ -47,19 +47,31 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+      # 版番号はビルドのたびに自動で進める（人手で上げる段は作らない）。
+      # 元は Actions の実行番号（github.run_number）で、表示版は「0.<実行番号>」、
+      # 内部のビルド番号も同じ実行番号。アプリ本体・リリース説明・IPA のファイル名の
+      # 3か所へ同じ番号を入れて、「何を入れたか」が見分けられるようにする（2026-11-22）。
       - name: Package unsigned IPA
+        env:
+          APP_VERSION: "0.${{ github.run_number }}"
+          BUILD_NUMBER: "${{ github.run_number }}"
         run: |
           mkdir -p build/Payload
           cp -R "build/DerivedData/Build/Products/Release-iphoneos/KonomiTV-iOS.app" build/Payload/
+          PLIST="build/Payload/KonomiTV-iOS.app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
           cd build
-          zip -r KonomiTV-iOS-unsigned.ipa Payload
-          ls -lh KonomiTV-iOS-unsigned.ipa
+          zip -r "KonomiTV-iOS-unsigned-$APP_VERSION.ipa" Payload
+          ls -lh "KonomiTV-iOS-unsigned-$APP_VERSION.ipa"
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: KonomiTV-iOS-unsigned-ipa
-          path: build/KonomiTV-iOS-unsigned.ipa
+          path: build/KonomiTV-iOS-unsigned-0.${{ github.run_number }}.ipa
           if-no-files-found: error
 
       # 成果物 zip は解凍すると IPA の時刻が世界標準時の数字で出て不便だったため、
@@ -71,8 +83,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="sideload-latest"
-          IPA="build/KonomiTV-iOS-unsigned.ipa"
-          NOTES="ビルド日時（日本時間）: $(date '+%Y/%m/%d %H:%M')
+          IPA="build/KonomiTV-iOS-unsigned-0.${{ github.run_number }}.ipa"
+          NOTES="版番号: 0.${{ github.run_number }}
+          ビルド日時（日本時間）: $(date '+%Y/%m/%d %H:%M')
           Actions 実行 ID: ${{ github.run_id }}
           実行ページ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           if gh release view "$TAG" > /dev/null 2>&1; then
