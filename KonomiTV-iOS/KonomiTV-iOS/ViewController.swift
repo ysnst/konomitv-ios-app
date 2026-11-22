@@ -42,6 +42,7 @@ final class ViewController: UIViewController {
             setNeedsStatusBarAppearanceUpdate()
             setNeedsUpdateOfHomeIndicatorAutoHidden()
             updateWebViewConstraints()
+            updateContentInsetAdjustmentBehavior()
         }
     }
 
@@ -204,6 +205,25 @@ final class ViewController: UIViewController {
         NSLayoutConstraint.activate(selected)
         appliedConstraints = selected
         print("[KonomiTV-iOS] WebView constraints updated: landscape=\(targetSize.width > targetSize.height), fullscreen=\(isNativeFullscreen)")
+    }
+
+    /// 全画面の間だけ、ページの表示領域が安全領域ぶん自動で押し
+    /// 上げられないようにする。
+    ///
+    /// WebView の枠自体は画面端まで届いていても、WKWebView には
+    /// ページの表示領域 (スクロールビューの中身) を安全領域ぶん
+    /// 内側へずらす既定の振る舞い (contentInsetAdjustmentBehavior
+    /// = .automatic) がある。横向き全画面では、映像が上の端から
+    /// 始まるのに下のホームバーぶん (約21pt) だけ押し上げられ、
+    /// 下にだけテーマ色の帯が残って見えた (2026-11-22、実機の
+    /// スクリーンショットを測って確認)。全画面の間だけ .never に
+    /// してページを枠いっぱいに広げ、抜けたら既定 (.automatic) へ
+    /// 戻す。通常時の表示には影響させない。
+    /// 切り替えは isNativeFullscreen の didSet に連動させる。
+    /// 開始・終了の経路 (橋渡し経由、URL 監視の保険経由) はすべて
+    /// この値を経由するため、戻し忘れが起きない。
+    private func updateContentInsetAdjustmentBehavior() {
+        webView?.scrollView.contentInsetAdjustmentBehavior = isNativeFullscreen ? .never : .automatic
     }
 
     override func viewWillAppear(_ animated: Bool) {
