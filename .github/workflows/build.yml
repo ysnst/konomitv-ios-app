@@ -7,6 +7,12 @@ name: Build (unsigned IPA)
 on:
   push:
     branches: [main]
+    # 記録（build-result-v1.md）だけの変更ではビルドを回さない。
+    # 変更の push で1回＋記録の push でもう1回と、版番号が2つ進んで
+    # 報告した版がリリースに残らなくなるのを防ぐ（2026-11-22）。
+    # 記録と他のファイルを一緒に送った場合は通常どおりビルドする。
+    paths-ignore:
+      - 'build-result-v1.md'
   pull_request:
   workflow_dispatch:
 
