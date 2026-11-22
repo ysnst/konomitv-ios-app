@@ -90,3 +90,38 @@
 ## 本番への接触（最終段階分）
 
 なし。録画サーバーの KonomiTV には一切触れていない。実機へのインストールも行っていない。
+
+# LiveContainer 起動失敗の修正（2026-11-22、不具合修正担当）
+
+ユーザーが署名なし IPA を LiveContainer に取り込んで実行したところ、起動時にエラーになった：
+"Failed to map /var/mobile/Containers/Data/Application/.../Documents/Applications/jp.tatsuya0902.konomitv.ios.app/(null): Bad file descriptor"
+
+## 裏取り結果（原因は親担当の読みどおりで確定）
+
+- ソースの Info.plist（KonomiTV-iOS/KonomiTV-iOS/Info.plist）に CFBundleExecutable が無い。
+- 前回のビルド済み IPA（実行 ID 44970711568）を展開しても、アプリ本体の Info.plist に CFBundleExecutable が無い（キー一覧を実測）。実行ファイル KonomiTV-iOS（Mach-O arm64、131,448 バイト）自体は存在する。
+- project.pbxproj は GENERATE_INFOPLIST_FILE = NO（Debug/Release 両方）のため、Xcode が自動では補わない。
+- つまり LiveContainer が CFBundleExecutable から実行ファイル名を引けず (null) になり、マップに失敗した、という読みで確定。
+- ついでに点検したところ、Xcode が通常自動生成する標準キーのうち CFBundleDevelopmentRegion も欠けていた（他の標準キー＝CFBundleName / Identifier / InfoDictionaryVersion / PackageType / ShortVersionString / Version / DisplayName は揃っていた）。
+
+## 直した内容
+
+- ソース Info.plist に2キーを追加した（コミット `f664207`）：
+  - CFBundleExecutable = $(EXECUTABLE_NAME)（本題の修正）
+  - CFBundleDevelopmentRegion = $(DEVELOPMENT_LANGUAGE)（標準キーの欠け。憶測ではなく、Xcode の自動生成テンプレートに必ず入るキーのため）
+- コード（Swift・プロジェクト設定）への変更はなし。
+
+## ビルドと実物の確認
+
+- GitHub Actions 実行 ID `44971311791`：**成功**（全ステップ通過。直し直しの再実行は不要だった）。
+- 新しい署名なし IPA を gh run download で取得し、build-output/KonomiTV-iOS-unsigned.ipa を差し替えた（27,684 バイト。差し替え前は 27,644 バイト）。
+- 新しい IPA を展開して実物で確認済み：Info.plist に CFBundleExecutable = KonomiTV-iOS が入っており、同名の実行ファイルも存在する。CFBundleDevelopmentRegion = en も入った。
+
+## 残っていること
+
+- 実機（LiveContainer）で起動するかは、ユーザーの次の試行待ち。こちらでは実機確認はしていない。
+- AppIcon は未投入のまま（従来どおり）。
+
+## 本番への接触（不具合修正分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。
