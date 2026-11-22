@@ -160,3 +160,40 @@
 ## 本番への接触（表示修正分）
 
 なし。録画サーバーの KonomiTV には一切触れていない。
+
+---
+
+# 追記：アプリアイコンの設定（2026-11-22 再開分）
+
+ユーザーの再確認（「アイコン入りでGitHubへpushし、クラウドでビルドしてよい」、クラウドでコードが実行される点を含む）を受けて再開した。
+
+## 裏取りと点検の結果
+
+- Contents.json は単一サイズ方式に差し替え済みで、`AppIcon-1024.png`（universal / ios / 1024x1024）を指していることを確認した。
+- アイコン画像は 1024×1024・RGB・透明なしで、仕様どおりだった（元絵は KonomiTV 公式アイコン、角の透明部分は元の背景グラデーションを再現して埋めたもの）。
+- 基本項目の点検（変更なし）：
+  - 表示名：CFBundleDisplayName = KonomiTV、あり。
+  - 起動画面：UILaunchScreen が UIColorName = LaunchBackground を指し、LaunchBackground.colorset（暗いグレー）も存在する。
+  - バージョン表記：MARKETING_VERSION = 0.1 / CURRENT_PROJECT_VERSION = 1 で、Info.plist から参照されている。ビルド後の実物でも 0.1 / 1 を確認した。
+
+## 実施したこと
+
+- アイコンの2点（Contents.json と AppIcon-1024.png）をコミット `028b009` で push した。
+- GitHub Actions 実行 ID `44972216378`：**成功**（全ステップ通過。再実行は不要だった）。
+
+## 新しい IPA とアイコン取り込みの確認
+
+- 署名なし IPA を gh run download で取得し、build-output/KonomiTV-iOS-unsigned.ipa を差し替えた（144,622 バイト。前回は 28,318 バイトで、増分はアイコン素材分）。
+- 展開した .app で実物確認済み：
+  - Info.plist の CFBundleIcons → CFBundlePrimaryIcon に CFBundleIconName = AppIcon と CFBundleIconFiles = [AppIcon60x60] が入っている。
+  - .app 直下に AppIcon60x60@2x.png（120×120）と AppIcon76x76@2x~ipad.png（152×152）が生成されている。
+  - Assets.car（129,656 バイト）が存在し、AppIcon の名前を含む。
+  - 前回までの修正（CFBundleExecutable = KonomiTV-iOS、表示名 KonomiTV、バージョン 0.1 / 1）も維持されている。
+
+## 残っていること
+
+- 実機でアイコンが表示されるかは、ユーザーの次の試行待ち。こちらでは実機確認はしていない。
+
+## 本番への接触（アプリアイコン分）
+
+なし。録画サーバーの KonomiTV には一切触れていない。
