@@ -47,7 +47,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// 音声セッションを「再生」カテゴリにしておく。
     /// Apple の案内でも、WKWebView の映像を PiP 対象にするには
     /// このカテゴリと、Info.plist のバックグラウンドモード (audio) が前提になる。
-    static func activateAudioSession() {
+    // 復帰時に呼ぶとWebKitの再生へ割り込む可能性があるため、起動時だけに限定する。
+    private func activateAudioSession() {
         let session = AVAudioSession.sharedInstance()
         PlaybackDiagnostics.record("native.audioConfigureBegin", ["category": session.category.rawValue, "mode": session.mode.rawValue])
         var stage = "category"
@@ -62,10 +63,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             // 音が出ない等の致命傷ではないので、起動は止めずに記録だけ残す
             print("[KonomiTV-iOS] Failed to activate audio session: \(error)")
         }
-    }
-
-    private func activateAudioSession() {
-        AppDelegate.activateAudioSession()
     }
 
     /// 通知を観測するだけで、割り込み時の再生/音声セッション状態を変更しない。

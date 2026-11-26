@@ -21,9 +21,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         PlaybackDiagnostics.record("native.sceneDidBecomeActive")
-        // 設定アプリで開く URL を変えて戻ってきた場合などに備え、音声セッションを有効に戻す。
-        // URL の再読み込み自体は ViewController.viewWillAppear で判定する。
-        AppDelegate.activateAudioSession()
+        // 実機ログでは復帰時のsetActive中〜直後にPiP動画が停止していた。
+        // WebKitが再生中の音声セッションをアプリ側から再取得せず、観測だけ行う。
         (window?.rootViewController as? ViewController)?.recordPlaybackSnapshot()
     }
 

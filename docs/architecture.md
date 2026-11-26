@@ -14,6 +14,6 @@ MutationObserverはwatchコンテナの生成・破棄とハンドラー再生�
 
 保存URL・Cookieストア・音声セッション・再生処理は既存方式。bundle IDは`jp.ysnst.konomitv.fullscreen`、表示名は`KonomiTV FS`として既存版と区別する。LiveContainerのデータ領域を共用・移行しない。初回にURLとCloudflare認証を入力する。
 
-0.2.2は停止順序を調べる診断版。既存konomiNativeへ固定スキーマのmediaDiagnosticを追加し、送信元検証後に数値・Boolean・既知列挙値だけを300件まで保持する。Nativeの音声通知/lifecycleと同じJSONへ記録し、利用者の3本指長押しで共有する。再生・PiP・音声設定の挙動は変えない。記録手順・対象と除外情報はdiagnostics.mdを参照。
+0.2.2で停止順序を調べる診断を追加。既存konomiNativeへ固定スキーマのmediaDiagnosticを追加し、送信元検証後に数値・Boolean・既知列挙値だけを300件まで保持する。Nativeの音声通知/lifecycleと同じJSONへ記録し、利用者の3本指長押しで共有する。0.2.3は実機ログに基づき復帰時の音声セッション再設定を撤去し、設定を起動時だけに限定した。再生・PiP APIの挙動は変えず診断も維持する。根拠・記録手順はdiagnostics.mdを参照。
 
 配信はActions Artifactsのみ。公開release/tagの作成・既存資産の上書きは行わない。IPA名とメタデータにバージョン/build番号/完全SHAを含める。

@@ -1,8 +1,28 @@
-# 再生停止の実機診断（0.2.2）
+# 再生停止の実機診断
 
 0.2.1/build 5でも、iOSコントロールセンターの開閉とアプリ背景→復帰で録画・ライブとも停止するという報告を受けた。PiPの単独切替だけでは停止せず、背景から戻る操作に伴う。ライブは停止後プレイヤー再起動まで不安定。LiveContainer 3.8.14、iOSの自動PiP設定はON。iOSの版は診断JSONへ自動記録する。
 
-0.2.2は原因調査用であり、修正済みを示す版ではない。音声セッション再設定・再生・PiP・配信・画面回転の処理は0.2.1から変更しない。
+0.2.2は原因調査用で、音声セッション再設定・再生・PiP・配信・画面回転の処理を0.2.1から変更せず観測した。提供された診断を受け、0.2.3では復帰時の音声セッション再設定だけを撤去した。実機改善は確認待ち。
+
+## 提供された実機ログの分析
+
+iOS 26.7.3 / 0.2.2 build 7、152イベント。原本は利用者添付のJSONで、リポジトリへは取り込まない。以下は起動時の最初の診断イベントを0秒とした相対時刻。
+
+| PiP復帰 | setActive相当区間 | pauseのWeb時刻 | pause受信 | buffer残秒 / readyState |
+|---|---|---|---|---|
+| 1 | 15.446–16.359秒 | 16.212秒 | 16.366秒 | 31.424 / 4 |
+| 2 | 20.460–21.362秒 | 21.227秒 | 21.367秒 | 24.687 / 4 |
+| 3 | 59.245–60.141秒 | 60.011秒 | 60.144秒 | 22.021 / 4 |
+| 4 | 103.371–104.280秒 | 104.288秒 | 104.291秒 | 0 / 3 |
+| 5 | 130.313–131.225秒 | 131.237秒 | 131.239秒 | 28.216 / 4 |
+
+setActive相当区間は、setCategory直後のaudioCategorySetからsetActive完了後のaudioConfigureEndまで。各回約0.9秒かかり、pause受信は終了の3～14ms後。最初の3回のpauseはWeb側の時刻では処理中に発火しているため、受信時刻だけで「呼び出し終了後に発火」と解釈しない。
+
+5回すべてrate=1、error=0。4回はreadyState=4かつ22秒以上のbufferがあり、単純なバッファ不足による停止では説明できない。4回目のbuffer=0については配信方式・再生種別がログにないため、同じ説明を当てはめない。
+
+Nativeのinterruptionは7件すべてbeganで、Web側のplay/playing直前に記録されている。ホストアプリとWebKitの音声セッション競合を支持するが、割り込み元はこのJSONから特定できない。背景遷移時のinline動画のpauseは復帰時のpauseとは別の経路として扱う。inactiveだけの1サイクルでは新たなpauseを直接確認できず、Control Centerの症状すべての因果は確定していない。
+
+0.2.3は、PiP復帰5回の反復した記録を根拠にsceneDidBecomeActiveからsetCategory/setActiveを除去した最小修正。起動時設定、観測、再生/PiP APIは維持。無条件playやライブ再起動は追加しない。自動PiP開始は別途未解決で、この修正で実現したとはしない。
 
 ## 記録の取り方
 
@@ -27,7 +47,7 @@ URL、Cookie、認証ヘッダー、番組名、動画ソースURL、エラー�
 
 ## 現在の見立てと限界
 
-本家由来の`sceneDidBecomeActive`は復帰のたびに音声セッションをsetCategory/setActiveする。これが停止に先行するか、OSの割り込みやWeb側のpause・bufferingに先行されるかを記録で調べる。同値設定の再実行が原因とは断定していない。ライブでは公開PlayerControllerのバッファ待ちが再生速度0を使う場合があるが、導入サーバーで同じ経路かは未確認。
+0.2.2までの本家由来の`sceneDidBecomeActive`は復帰のたびに音声セッションをsetCategory/setActiveしていた。0.2.3でこの呼び出しを撤去し、同じ操作後の再生継続を比較する。ライブでは公開PlayerControllerのバッファ待ちが再生速度0を使う場合があるが、提供ログの上記5回はrate=1だった。
 
 WKWebViewの`allowsPictureInPictureMediaPlayback`はPiPの許可で、自動inline PiPを必ず開始する設定ではない。AVKitの`canStartPictureInPictureAutomaticallyFromInline`相当の公開WK設定は確認できていない。今回のWebView全体の全画面化は、動画だけをAVKitの全画面へ移すものではない。Control Centerでも呼ばれるinactive通知にPiP要求を追加しない。
 
@@ -38,4 +58,4 @@ WKWebViewの`allowsPictureInPictureMediaPlayback`はPiPの許可で、自動inli
 - [WebKit: 公開WKWebViewConfiguration](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebViewConfiguration.h)
 - [Apple: PiPと自動開始](https://developer.apple.com/documentation/avkit/adopting-picture-in-picture-in-a-standard-player)
 
-実機記録を確認するまで、停止原因・自動PiPが実現できる範囲を確定しない。
+0.2.3の実機再検証までは、停止の解消を確定しない。自動PiPが実現できる範囲も未確定。
