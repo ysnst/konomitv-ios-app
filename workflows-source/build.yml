@@ -2,7 +2,7 @@ name: Build unsigned fullscreen IPA
 
 on:
   push:
-    branches: [codex/serverless-fullscreen]
+    branches: [main]
     paths: ['KonomiTV-iOS/**', 'tests/**', '.github/workflows/build.yml']
   workflow_dispatch:
 

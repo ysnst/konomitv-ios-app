@@ -2,7 +2,7 @@
 
 0.2.1/build 5でも、iOSコントロールセンターの開閉とアプリ背景→復帰で録画・ライブとも停止するという報告を受けた。PiPの単独切替だけでは停止せず、背景から戻る操作に伴う。ライブは停止後プレイヤー再起動まで不安定。LiveContainer 3.8.14、iOSの自動PiP設定はON。iOSの版は診断JSONへ自動記録する。
 
-0.2.2は原因調査用で、音声セッション再設定・再生・PiP・配信・画面回転の処理を0.2.1から変更せず観測した。提供された診断を受け、0.2.3では復帰時の音声セッション再設定だけを撤去した。実機改善は確認待ち。
+0.2.2は原因調査用で、音声セッション再設定・再生・PiP・配信・画面回転の処理を0.2.1から変更せず観測した。提供された診断を受け、0.2.3では復帰時の音声セッション再設定だけを撤去した。提供後に利用者から現在の動作が希望どおりとの確認を受けており、経緯と確認範囲を以下に記録する。
 
 ## 提供された実機ログの分析
 
@@ -58,4 +58,4 @@ WKWebViewの`allowsPictureInPictureMediaPlayback`はPiPの許可で、自動inli
 - [WebKit: 公開WKWebViewConfiguration](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebViewConfiguration.h)
 - [Apple: PiPと自動開始](https://developer.apple.com/documentation/avkit/adopting-picture-in-picture-in-a-standard-player)
 
-0.2.3の実機再検証までは、停止の解消を確定しない。自動PiPが実現できる範囲も未確定。
+2026-11-27、0.2.3/build 8提供後に利用者から「自動PiPは不要で、現状は理想どおりの動作」との確認を受けた。現在の挙動を維持し、自動PiPは対応対象から外す。この診断手順は、今後症状が再発した場合の調査用として保持する。
