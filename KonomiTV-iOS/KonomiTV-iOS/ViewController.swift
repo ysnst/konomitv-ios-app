@@ -150,6 +150,13 @@ final class ViewController: UIViewController {
         self.webView = webView
         updateWebViewConstraints()
 
+        // 通常操作に重ならない3本指の長押しで、利用者が明示したときだけ診断JSONを共有する。
+        let diagnosticsGesture = UILongPressGestureRecognizer(target: self, action: #selector(sharePlaybackDiagnostics(_:)))
+        diagnosticsGesture.numberOfTouchesRequired = 3
+        diagnosticsGesture.minimumPressDuration = 1.5
+        diagnosticsGesture.cancelsTouchesInView = false
+        webView.addGestureRecognizer(diagnosticsGesture)
+
         // 端末の物理的な向きの監視を始める (全画面終了後の許可向きの復帰判定に使う)。
         // 縦向きロックの状態はアプリからは読めないため、代わりに端末の姿勢そのものを見る。
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -322,6 +329,29 @@ final class ViewController: UIViewController {
             webView?.evaluateJavaScript("document.dispatchEvent(new Event('konomi-native-fullscreen-reset'))", completionHandler: nil)
         }
         setNativeFullscreen(false)
+    }
+
+    func recordPlaybackSnapshot() {
+        guard isTrustedWatchURL(webView?.url) else { return }
+        webView.evaluateJavaScript("document.dispatchEvent(new Event('konomi-diagnostics-snapshot'))", completionHandler: nil)
+    }
+
+    @objc private func sharePlaybackDiagnostics(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, presentedViewController == nil else { return }
+        do {
+            let info = Bundle.main.infoDictionary ?? [:]
+            let version = "\(info["CFBundleShortVersionString"] ?? "unknown")/\(info["CFBundleVersion"] ?? "unknown")"
+            let data = try PlaybackDiagnostics.snapshot(version: version, systemVersion: UIDevice.current.systemVersion)
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("KonomiTV-Diagnostics-\(UUID().uuidString).json")
+            try data.write(to: file, options: .atomic)
+            let share = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+            share.popoverPresentationController?.sourceView = view
+            share.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            share.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file) }
+            present(share, animated: true)
+        } catch {
+            print("[KonomiTV-iOS] Failed to export playback diagnostics")
+        }
     }
 
     private func isTrustedOriginURL(_ url: URL?) -> Bool {
@@ -656,11 +686,7 @@ extension ViewController: WKScriptMessageHandler {
               isTrustedOriginURL(message.frameInfo.request.url),
               isTrustedWatchURL(webView.url),
               let body = message.body as? [String: Any],
-              body.count == 2,
-              let type = body["type"] as? String,
-              type == "fullscreen",
-              let value = body["enter"] as? NSNumber,
-              CFGetTypeID(value) == CFBooleanGetTypeID() else {
+              let type = body["type"] as? String else {
             return
         }
         // frame URL に加え WebKit の securityOrigin も検証する (iframe・認証ドメインを除外)。
@@ -670,6 +696,13 @@ extension ViewController: WKScriptMessageHandler {
               origin.host.lowercased() == frameURL.host?.lowercased(),
               (origin.port == 0 ? (origin.protocol.lowercased() == "https" ? 443 : 80) : origin.port)
                 == (frameURL.port ?? (frameURL.scheme?.lowercased() == "https" ? 443 : 80)) else { return }
+        if type == "mediaDiagnostic" {
+            PlaybackDiagnostics.recordWebMessage(body)
+            return
+        }
+        guard body.count == 2,
+              let value = body["enter"] as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else { return }
         switch type {
         case "fullscreen":
             let enter = value.boolValue
@@ -696,6 +729,7 @@ extension ViewController: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        PlaybackDiagnostics.record("native.webProcessTerminated")
         setNativeFullscreen(false)
     }
 

@@ -9,6 +9,41 @@
     const isWatch = () => /^\/(tv|videos)\/watch\/[^/]+\/?$/.test(location.pathname);
     const post = (enter) => window.webkit.messageHandlers.konomiNative.postMessage({type: 'fullscreen', enter});
 
+    // 停止の発生順序を観測するだけで、play/pause/PiP/配信ソースを操作しない。
+    const mediaEvents = ['play', 'playing', 'pause', 'waiting', 'stalled', 'ratechange', 'error', 'emptied',
+        'loadedmetadata', 'enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged'];
+    function recordMedia(event) {
+        if (!isWatch()) return;
+        if (mediaEvents.includes(event.type) && !(event.target instanceof HTMLVideoElement)) return;
+        const video = event.target instanceof HTMLVideoElement ? event.target : document.querySelector('.watch-player video');
+        if (!video || !video.isConnected || !video.closest('.watch-player')) return;
+        const finite = value => Number.isFinite(value) && value >= 0 ? value : 0;
+        let bufferAhead = 0;
+        try {
+            for (let index = 0; index < video.buffered.length; index++) {
+                if (video.buffered.start(index) <= video.currentTime && video.currentTime <= video.buffered.end(index)) {
+                    bufferAhead = video.buffered.end(index) - video.currentTime;
+                    break;
+                }
+            }
+        } catch { /* バッファ入替中の取得失敗は0として記録する。 */ }
+        const known = (value, values) => values.includes(value) ? value : 'unknown';
+        const audio = navigator.audioSession;
+        window.webkit.messageHandlers.konomiNative.postMessage({type: 'mediaDiagnostic', event: event.type, state: {
+            time: Date.now(), paused: video.paused, ended: video.ended, hidden: document.hidden,
+            readyState: video.readyState, networkState: video.networkState, position: finite(video.currentTime),
+            rate: finite(video.playbackRate), bufferAhead: finite(bufferAhead), error: video.error?.code ?? 0,
+            pip: document.pictureInPictureElement === video ? 'picture-in-picture' :
+                known(video.webkitPresentationMode ?? 'inline', ['inline', 'picture-in-picture', 'fullscreen']),
+            audioState: known(audio?.state, ['active', 'inactive', 'interrupted']),
+            audioType: known(audio?.type, ['auto', 'playback', 'transient', 'transient-solo', 'ambient', 'play-and-record'])
+        }});
+    }
+    for (const event of mediaEvents) document.addEventListener(event, recordMedia, true);
+    document.addEventListener('visibilitychange', recordMedia);
+    window.addEventListener('pagehide', recordMedia);
+    document.addEventListener('konomi-diagnostics-snapshot', () => recordMedia({type: 'snapshot', target: document}));
+
     function emit() {
         // 公開 PlayerController の既存ハンドラーに is_fullscreen を更新させる。
         // Vue/Pinia の内部オブジェクトや動画の再生状態には触れない。

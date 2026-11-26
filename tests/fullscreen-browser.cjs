@@ -38,9 +38,10 @@ const html = `<html><head><style>
         await page.route('**/*', route => route.fulfill({body: html, contentType: 'text/html'}));
         await page.addInitScript(() => {
             window.messages = [];
+            window.diagnostics = [];
             window.syntheticResizeCount = 0;
             window.addEventListener('resize', event => { if (!event.isTrusted) syntheticResizeCount++; });
-            window.webkit = {messageHandlers: {konomiNative: {postMessage: m => messages.push(m)}}};
+            window.webkit = {messageHandlers: {konomiNative: {postMessage: m => (m.type === 'mediaDiagnostic' ? diagnostics : messages).push(m)}}};
             // iPhone のページ全体Fullscreen API不在を再現する。
             Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {value: undefined, writable: true, configurable: true});
             Object.defineProperty(HTMLElement.prototype, 'webkitRequestFullscreen', {value: undefined, writable: true, configurable: true});
@@ -179,6 +180,23 @@ const html = `<html><head><style>
             await p.click('.panel-close-button');
             assert.equal((await p.locator('.watch-player').boundingBox()).width, 852);
             assert.equal(await p.evaluate(() => store.is_fullscreen), true);
+            await p.close();
+        });
+        await check('Media diagnostics observe interruption state without controlling playback', async () => {
+            const p = await pageFor();
+            const observed = await p.evaluate(() => {
+                const video = document.querySelector('video');
+                const before = {play: video.play, pause: video.pause, time: video.currentTime, rate: video.playbackRate};
+                video.setAttribute('data-private-url', 'https://private.invalid/?token=secret');
+                video.dispatchEvent(new Event('pause'));
+                document.dispatchEvent(new Event('visibilitychange'));
+                document.dispatchEvent(new Event('konomi-diagnostics-snapshot'));
+                return {events: diagnostics, untouched: before.play === video.play && before.pause === video.pause && before.time === video.currentTime && before.rate === video.playbackRate};
+            });
+            assert.equal(observed.untouched, true);
+            assert.deepEqual(observed.events.map(e => e.event), ['pause', 'visibilitychange', 'snapshot']);
+            assert.equal(JSON.stringify(observed).includes('secret'), false);
+            assert.equal(Object.keys(observed.events[0].state).length, 13);
             await p.close();
         });
         writeFileSync(resolve('artifacts/verification/browser-results.json'), JSON.stringify({browser: process.env.BROWSER || 'chromium', passed: results}, null, 2));

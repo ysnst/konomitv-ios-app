@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 25
     env:
       TZ: Asia/Tokyo
-      APP_VERSION: '0.2.1'
+      APP_VERSION: '0.2.2'
       BUILD_NUMBER: '${{ github.run_number }}'
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +34,10 @@ jobs:
           node artifacts/tooling/node_modules/playwright/cli.js install webkit
           node --check KonomiTV-iOS/KonomiTV-iOS/FullscreenBridge.js
           node tests/fullscreen-browser.cjs
+      - name: Test native diagnostic validation
+        run: |
+          swiftc -swift-version 5 KonomiTV-iOS/KonomiTV-iOS/PlaybackDiagnostics.swift tests/diagnostics.swift -o artifacts/verification/diagnostics-tests
+          artifacts/verification/diagnostics-tests
       - name: Release build without signing
         run: |
           set -o pipefail
@@ -74,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fullscreen-0.2.1-${{ github.run_number }}-${{ github.sha }}
+          name: fullscreen-0.2.2-${{ github.run_number }}-${{ github.sha }}
           path: |
             artifacts/ipa/**/*.ipa
             artifacts/ipa/**/SHA256SUMS.txt
