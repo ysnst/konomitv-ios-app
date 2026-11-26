@@ -18,7 +18,7 @@
 ## 記録するもの
 
 - アプリ版/build、iOS版、イベントの受信時刻。
-- sceneのactive/inactive/background/foreground、音声セッション設定の開始/終了、割り込みtype/options/suspended、経路変更reason、media services reset、Webプロセス終了。
+- sceneのactive/inactive/background/foreground、音声セッション設定の開始/終了、割り込みtype/options/reason、経路変更reason、media services reset、Webプロセス終了。
 - Web動画のplay/playing/pause/waiting/stalled/ratechange/error、PiP・visibilityイベント。現在位置、再生速度、paused/ended、readyState/networkState、現在位置からのバッファ残秒、エラー番号、PiPモード、対応環境のaudioSession state/type。
 
 URL、Cookie、認証ヘッダー、番組名、動画ソースURL、エラー本文、音声出力先のデバイス名は記録しない。JavaScriptから受け取る形式・キー・数値範囲・列挙値を検証する。診断受付にも既存の信頼origin/main frame/視聴URL制限を適用する。

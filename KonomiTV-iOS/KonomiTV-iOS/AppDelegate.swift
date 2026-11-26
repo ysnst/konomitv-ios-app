@@ -76,7 +76,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             PlaybackDiagnostics.record("native.audioInterruption", [
                 "type": (info[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.intValue ?? -1,
                 "options": (info[AVAudioSessionInterruptionOptionKey] as? NSNumber)?.intValue ?? 0,
-                "suspended": (info[AVAudioSessionInterruptionWasSuspendedKey] as? NSNumber)?.boolValue ?? false
+                "reason": (info[AVAudioSessionInterruptionReasonKey] as? NSNumber)?.intValue ?? -1
             ])
         })
         diagnosticObservers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { notification in
