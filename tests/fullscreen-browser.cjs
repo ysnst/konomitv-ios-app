@@ -140,7 +140,13 @@ const html = `<html><head><style>
             assert.equal(await p.evaluate(() => store.is_fullscreen), false);
             assert.equal(await p.evaluate(() => HTMLVideoElement.prototype.requestPictureInPicture === originalPiP), true);
             await p.click('#fullscreen');
-            await p.evaluate(() => {const v = document.querySelector('video'); v.webkitPresentationMode = 'picture-in-picture'; v.dispatchEvent(new Event('webkitpresentationmodechanged'));});
+            await p.evaluate(() => {
+                const v = document.querySelector('video');
+                // WebKitの実プロパティは読み取り専用なので、イベント再現用のown getterを置く。
+                Object.defineProperty(v, 'webkitPresentationMode', {get: () => 'picture-in-picture', configurable: true});
+                if (v.webkitPresentationMode !== 'picture-in-picture') throw new Error('PiP fixture not initialized');
+                v.dispatchEvent(new Event('webkitpresentationmodechanged'));
+            });
             assert.equal(await p.evaluate(() => store.is_fullscreen), false);
             await p.close();
         });
