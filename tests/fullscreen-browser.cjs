@@ -16,17 +16,17 @@ const bridge = readFileSync('KonomiTV-iOS/KonomiTV-iOS/FullscreenBridge.js', 'ut
 const html = `<html><head><style>
 *{box-sizing:border-box} body{margin:0;background:#000;color:white;font-family:sans-serif}
 .route-container{height:100vh;border-bottom:21px solid #1e1310;overflow:hidden}
-.watch-container{display:flex;width:100%;height:100%}.watch-content{position:relative;flex:1;min-width:0}
+.watch-container{display:flex;width:calc(100% + 310px);height:100%}.watch-container--panel-display{width:100%}.watch-content{position:relative;flex:1;min-width:0}
 .watch-panel{width:310px;flex-shrink:0;background:#39251e}.watch-navigation{width:68px;background:#1e1310}
 .watch-header{position:absolute;top:0;background:#1e1310;z-index:2;width:100%;height:60px}
 .watch-player{height:100%}video{width:100%;height:100%;object-fit:contain}
 .subtitle{position:absolute;bottom:100px;left:20px}.comment{position:absolute;top:100px;left:200px}
 .controls{position:absolute;bottom:25px;left:20px;right:20px}button{padding:12px}
-</style></head><body><div class="route-container"><main class="watch-container watch-container--panel-display">
+</style></head><body><div class="route-container"><main class="watch-container">
 <nav class="watch-navigation">Navigation</nav><div class="watch-content"><header class="watch-header">Header</header>
 <div class="watch-player"><video playsinline></video><span class="subtitle">Subtitle</span><span class="comment">Comment</span>
-<div class="controls"><input type="range"><button id="fullscreen">Fullscreen</button><button>Quality</button></div></div></div>
-<aside class="watch-panel">Panel</aside></main></div></body></html>`;
+<div class="controls"><input type="range"><button id="fullscreen">Fullscreen</button><button>Quality</button><button class="switch-button-panel">Panel</button></div></div></div>
+<aside class="watch-panel">Panel<button class="panel-close-button">Close</button></aside></main></div></body></html>`;
 
 (async () => {
     const browser = await (process.env.BROWSER === 'webkit' ? webkit : chromium).launch({
@@ -38,6 +38,8 @@ const html = `<html><head><style>
         await page.route('**/*', route => route.fulfill({body: html, contentType: 'text/html'}));
         await page.addInitScript(() => {
             window.messages = [];
+            window.syntheticResizeCount = 0;
+            window.addEventListener('resize', event => { if (!event.isTrusted) syntheticResizeCount++; });
             window.webkit = {messageHandlers: {konomiNative: {postMessage: m => messages.push(m)}}};
             // iPhone のページ全体Fullscreen API不在を再現する。
             Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {value: undefined, writable: true, configurable: true});
@@ -60,7 +62,10 @@ const html = `<html><head><style>
                 window.controller = {player: {fullScreen: {}, notice: () => {window.notice = true;}}};
                 setupFullscreenHandler.call(controller);
                 document.querySelector('#fullscreen').onclick = () => controller.player.fullScreen.request();
-            }; installController(); })();`);
+            }; installController();
+            document.querySelector('.switch-button-panel').onclick = () => document.querySelector('.watch-container').classList.toggle('watch-container--panel-display');
+            document.querySelector('.panel-close-button').onclick = () => document.querySelector('.watch-container').classList.remove('watch-container--panel-display');
+            })();`);
         return page;
     }
     async function check(name, fn) { await fn(); results.push(name); console.log('PASS ' + name); }
@@ -75,7 +80,7 @@ const html = `<html><head><style>
             await p.click('#fullscreen');
             assert.equal(await p.evaluate(() => store.is_fullscreen && document.fullscreenElement === document.body), true);
             assert.equal(await p.locator('.watch-header').isVisible(), false);
-            assert.equal(await p.locator('.watch-panel').isVisible(), false);
+            assert.equal((await p.locator('.watch-panel').boundingBox()).x, 852);
             assert.equal(await p.locator('.subtitle').isVisible(), true);
             assert.equal(await p.locator('.comment').isVisible(), true);
             const bounds = await p.locator('.watch-player').boundingBox(); assert.equal(bounds.width, 852); assert.equal(bounds.height, 393);
@@ -119,11 +124,15 @@ const html = `<html><head><style>
                 assert.equal(await p.evaluate(() => messages.length), 0); await p.close();
             });
         }
-        await check('Background/pagehide exits and same node remains', async () => {
+        await check('Background keeps fullscreen stable; pagehide still exits', async () => {
             const p = await pageFor(); await p.click('#fullscreen');
+            const resizeCount = await p.evaluate(() => syntheticResizeCount);
             await p.evaluate(() => {Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'));});
-            assert.equal(await p.evaluate(() => store.is_fullscreen), false);
-            await p.click('#fullscreen'); await p.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+            assert.equal(await p.evaluate(() => store.is_fullscreen), true);
+            await p.evaluate(() => {Object.defineProperty(document, 'hidden', {value: false, configurable: true}); document.dispatchEvent(new Event('visibilitychange'));});
+            assert.deepEqual(await p.evaluate(() => messages.map(m => m.enter)), [true]);
+            assert.equal(await p.evaluate(() => syntheticResizeCount), resizeCount);
+            await p.evaluate(() => window.dispatchEvent(new Event('pagehide')));
             assert.equal(await p.evaluate(() => store.is_fullscreen), false); await p.close();
         });
         await check('Nonconfigurable API fails safely without observer loop', async () => {
@@ -135,12 +144,12 @@ const html = `<html><head><style>
             assert.equal(await p.evaluate(() => messages.length), 0);
             await p.close();
         });
-        await check('Foreground PiP event exits layout without replacing video APIs', async () => {
+        await check('PiP entry/return keeps layout stable and leaves video APIs intact', async () => {
             const p = await pageFor(); await p.click('#fullscreen');
+            const resizeCount = await p.evaluate(() => syntheticResizeCount);
             await p.evaluate(() => document.querySelector('video').dispatchEvent(new Event('enterpictureinpicture')));
-            assert.equal(await p.evaluate(() => store.is_fullscreen), false);
+            assert.equal(await p.evaluate(() => store.is_fullscreen), true);
             assert.equal(await p.evaluate(() => HTMLVideoElement.prototype.requestPictureInPicture === originalPiP), true);
-            await p.click('#fullscreen');
             await p.evaluate(() => {
                 const v = document.querySelector('video');
                 // WebKitの実プロパティは読み取り専用なので、イベント再現用のown getterを置く。
@@ -148,7 +157,28 @@ const html = `<html><head><style>
                 if (v.webkitPresentationMode !== 'picture-in-picture') throw new Error('PiP fixture not initialized');
                 v.dispatchEvent(new Event('webkitpresentationmodechanged'));
             });
-            assert.equal(await p.evaluate(() => store.is_fullscreen), false);
+            assert.equal(await p.evaluate(() => store.is_fullscreen), true);
+            await p.evaluate(() => {
+                const v = document.querySelector('video');
+                Object.defineProperty(v, 'webkitPresentationMode', {get: () => 'inline', configurable: true});
+                v.dispatchEvent(new Event('webkitpresentationmodechanged'));
+                v.dispatchEvent(new Event('leavepictureinpicture'));
+            });
+            assert.deepEqual(await p.evaluate(() => messages.map(m => m.enter)), [true]);
+            assert.equal(await p.evaluate(() => syntheticResizeCount), resizeCount);
+            await p.close();
+        });
+        await check('Fullscreen side panel opens and closes through existing controls', async () => {
+            const p = await pageFor(); await p.click('#fullscreen');
+            await p.click('.switch-button-panel');
+            assert.equal((await p.locator('.watch-panel').boundingBox()).x, 542);
+            assert.equal((await p.locator('.watch-player').boundingBox()).width, 542);
+            assert.equal(await p.evaluate(() => store.is_fullscreen), true);
+            mkdirSync('artifacts/verification', {recursive: true});
+            await p.screenshot({path: 'artifacts/verification/fixture-fullscreen-panel-open.png'});
+            await p.click('.panel-close-button');
+            assert.equal((await p.locator('.watch-player').boundingBox()).width, 852);
+            assert.equal(await p.evaluate(() => store.is_fullscreen), true);
             await p.close();
         });
         writeFileSync(resolve('artifacts/verification/browser-results.json'), JSON.stringify({browser: process.env.BROWSER || 'chromium', passed: results}, null, 2));

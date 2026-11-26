@@ -4,11 +4,11 @@
 
 既存のKonomiTV全画面ボタンから、字幕・実況・操作部品を含むWebプレイヤー全体を表示し、iOSの横向き・ステータスバー非表示へ接続します。サーバーの橋渡しパッチ適用や再ビルドは不要です。動画専用のiOS標準全画面へは移しません。
 
-現在は実機確認前の試作です。公開KonomiTV v0.14.1のFullscreen API契約を対象とし、利用中のサーバーが同じ実装かは別途確認が必要です。HEVC録画・生放送・PiPは元ラッパーでの利用者確認を基準とし、この改造版での回帰確認は未実施です。
+現在は実機検証中の試作です。公開KonomiTV v0.14.1のFullscreen API契約を対象とし、利用中のサーバーが同じ実装かは別途確認が必要です。0.2.0/build 4でPiP中の背景復帰時の停止、ライブPiPの途切れ、全画面パネルが開けないとの報告を受けました。0.2.1はパネルの強制非表示とPiP移行への表示変更を撤去した比較検証版です。PiP症状の改善は実機確認待ちです。
 
 ## 導入
 
-GitHub Actionsの`Build unsigned fullscreen IPA`が成功した実行から、`fullscreen-0.2.0-<build>-<SHA>`成果物をダウンロードします。zip内の未署名IPAをLiveContainerへ導入してください。公開リリースや固定タグへの自動アップロードは行いません。
+GitHub Actionsの`Build unsigned fullscreen IPA`が成功した実行から、`fullscreen-0.2.1-<build>-<SHA>`成果物をダウンロードします。zip内の未署名IPAをLiveContainerへ導入してください。公開リリースや固定タグへの自動アップロードは行いません。
 
 表示名は`KonomiTV FS`、bundle IDは`jp.ysnst.konomitv.fullscreen`です。元アプリと区別するため別IDを使用します。初回は接続先URLを入力し、Cloudflare Accessへ再ログインしてください。元アプリの設定・Cookieは移行しません。元アプリの領域を消したり、データ領域を共有したりしないでください。
 
@@ -16,7 +16,7 @@ GitHub Actionsの`Build unsigned fullscreen IPA`が成功した実行から、`f
 
 ## 開発と検証
 
-Swift 5 / iOS 16以降、外部Swift依存なし。ReleaseビルドはmacOS Actionsで行います。ワークフローは作業ブランチのコード変更で1回起動し、IPA・SHA-256・ビルド元完全SHA・Xcodeログを保存します。版は0.2.0、build番号はActionsのrun_numberです。
+Swift 5 / iOS 16以降、外部Swift依存なし。ReleaseビルドはmacOS Actionsで行います。ワークフローは作業ブランチのコード変更で1回起動し、IPA・SHA-256・ビルド元完全SHA・Xcodeログを保存します。版は0.2.1、build番号はActionsのrun_numberです。
 
 JavaScriptの契約テストは、固定SHAの公開PlayerControllerを読み込み、型注釈だけ除いた全画面ハンドラーを実ブラウザで実行します。テスト対象のソースは`artifacts/reference/PlayerController-v0.14.1.ts`へ取得し、`PLAYWRIGHT_MODULE`にPlaywrightのパスを指定して`node tests/fullscreen-browser.cjs`で実行します。CIはPlaywright WebKit、Windowsでは検証専用Chromiumを使用します。
 

@@ -68,11 +68,8 @@
             const style = document.createElement('style');
             style.textContent = `
                 .konomi-native-fullscreen .route-container { border: 0 !important; }
-                .konomi-native-fullscreen .watch-container { width: 100% !important; transition: none !important; }
-                .konomi-native-fullscreen .watch-content { width: 100% !important; flex: 1 1 auto; }
                 .konomi-native-fullscreen .watch-header,
-                .konomi-native-fullscreen .watch-navigation,
-                .konomi-native-fullscreen .watch-panel { display: none !important; }
+                .konomi-native-fullscreen .watch-navigation { display: none !important; }
             `;
             document.head.append(style);
             installed.removeStyle = () => style.remove();
@@ -111,15 +108,7 @@
     window.addEventListener('pagehide', () => { setActive(false); });
     // ネイティブからのresetも応答する。非同期resetと次のenterが交差しても最終状態を揃える。
     document.addEventListener('konomi-native-fullscreen-reset', () => setActive(false));
-    // PiP APIそのものは変更せず、前景のまま小窓へ移る場合も通常レイアウトへ戻す。
-    document.addEventListener('enterpictureinpicture', () => setActive(false), true);
-    document.addEventListener('webkitpresentationmodechanged', (event) => {
-        if (event.target.webkitPresentationMode === 'picture-in-picture') setActive(false);
-    }, true);
-    // バックグラウンド/PiP 中は動画に触れず表示だけ通常へ戻す。
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) setActive(false);
-        else { refresh(); if (installed) emit(); }
-    });
+    // PiP/背景移行では全画面状態を保つ。移行中の縦回転や復帰時の疑似resizeを避け、
+    // WebKitによる動画の表示先変更へ介入しない。明示解除・ページ離脱時だけ状態を戻す。
     refresh();
 })

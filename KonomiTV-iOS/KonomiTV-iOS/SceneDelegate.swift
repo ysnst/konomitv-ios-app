@@ -25,8 +25,4 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         AppDelegate.activateAudioSession()
     }
 
-    func sceneWillResignActive(_ scene: UIScene) {
-        // PiP へ移る動画は維持し、背景に残る全画面表示だけ解除する。
-        (window?.rootViewController as? ViewController)?.resetFullscreen()
-    }
 }

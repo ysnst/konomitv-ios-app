@@ -8,8 +8,10 @@ body.requestFullscreen → JSの全画面状態 → body.fullscreenchange → �
 
 全画面中はWebViewを四辺へ広げ、ステータスバーを隠しホームインジケーターの自動非表示を要求する。既存UIWindowScene回転を利用し、解除時は開始姿勢を問わず縦へ戻す。回転要求エラーは同じ世代の操作に限り状態を戻す。OS/LiveContainerが要求を拒否する可能性は実機で確認する。
 
-MutationObserverはwatchコンテナの生成・破棄とハンドラー再生成に追随する。画質変更でvideoだけ交換されても全画面を維持する。watchコンテナ交換では解除し、再度全画面化できるよう再登録する。視聴画面離脱では元のAPI descriptorとCSSを復元する。pagehide/非表示/scene非アクティブ/新規ナビゲーションでは解除する。PiP移行時も映像を止めず、復帰後は通常表示から再度全画面を選ぶ。
+MutationObserverはwatchコンテナの生成・破棄とハンドラー再生成に追随する。画質変更でvideoだけ交換されても全画面を維持する。watchコンテナ交換では解除し、再度全画面化できるよう再登録する。視聴画面離脱では元のAPI descriptorとCSSを復元する。pagehide/新規ナビゲーションでは解除する。PiP・背景移行では全画面状態を維持し、復帰時に疑似fullscreenchange/resizeを再送しない。OSのPiP遷移中に縦回転やレイアウト切替を割り込ませないためである。
+
+情報パネルは既存Web側のis_panel_displayとコンテナ幅による開閉をそのまま利用する。全画面CSSでパネルを常時非表示にしたり、コンテナ幅を強制固定したりしない。ヘッダーとナビの非表示・下border除去だけを補う。元のパネル表示設定が有効なら全画面でもパネルが表示され、右側ボタンで閉じられる。
 
 保存URL・Cookieストア・音声セッション・再生処理は既存方式。bundle IDは`jp.ysnst.konomitv.fullscreen`、表示名は`KonomiTV FS`として既存版と区別する。LiveContainerのデータ領域を共用・移行しない。初回にURLとCloudflare認証を入力する。
 
-配信はActions Artifactsのみ。公開release/tagの作成・既存資産の上書きは行わない。IPA名とメタデータに0.2.0/build番号/完全SHAを含める。
+配信はActions Artifactsのみ。公開release/tagの作成・既存資産の上書きは行わない。IPA名とメタデータにバージョン/build番号/完全SHAを含める。
