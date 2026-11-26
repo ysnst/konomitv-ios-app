@@ -98,7 +98,8 @@ const html = `<html><head><style>
             await p.waitForFunction(() => store.is_fullscreen);
             await p.evaluate(() => document.dispatchEvent(new Event('konomi-native-fullscreen-reset')));
             assert.equal(await p.evaluate(() => store.is_fullscreen), false);
-            assert.equal(await p.evaluate(() => messages.length), 11);
+            assert.equal(await p.evaluate(() => messages.length), 12);
+            assert.equal(await p.evaluate(() => messages.at(-1).enter), false);
             await p.close();
         });
         await check('SPA watch departure restores APIs and reentry reinstalls', async () => {

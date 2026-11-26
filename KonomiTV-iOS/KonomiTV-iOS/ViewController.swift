@@ -673,6 +673,11 @@ extension ViewController: WKScriptMessageHandler {
         switch type {
         case "fullscreen":
             let enter = value.boolValue
+            // バックグラウンド移行前に送られ、遅れて届いた開始通知を採用しない。
+            if enter && view.window?.windowScene?.activationState != .foregroundActive {
+                resetFullscreen()
+                return
+            }
             // 受信の記録を残す (実機確認で、失敗した回と突き合わせられるように)。
             print("[KonomiTV-iOS] Bridge message received: fullscreen enter=\(enter)")
             setNativeFullscreen(enter)

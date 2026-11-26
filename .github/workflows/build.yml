@@ -42,6 +42,7 @@ jobs:
             -project KonomiTV-iOS/KonomiTV-iOS.xcodeproj \
             -scheme KonomiTV-iOS \
             -configuration Release \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath artifacts/DerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \

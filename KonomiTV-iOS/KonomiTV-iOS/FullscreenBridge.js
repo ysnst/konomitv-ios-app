@@ -18,12 +18,12 @@
         window.dispatchEvent(new Event('resize'));
     }
 
-    function setActive(enter, notify = true) {
+    function setActive(enter) {
         if (active === enter) return;
         active = enter;
         document.documentElement.classList.toggle('konomi-native-fullscreen', enter);
         emit();
-        if (notify) post(enter);
+        post(enter);
     }
 
     function uninstall() {
@@ -109,7 +109,8 @@
     new MutationObserver(refresh).observe(document, {childList: true, subtree: true});
     window.addEventListener('popstate', refresh);
     window.addEventListener('pagehide', () => { setActive(false); });
-    document.addEventListener('konomi-native-fullscreen-reset', () => setActive(false, false));
+    // ネイティブからのresetも応答する。非同期resetと次のenterが交差しても最終状態を揃える。
+    document.addEventListener('konomi-native-fullscreen-reset', () => setActive(false));
     // PiP APIそのものは変更せず、前景のまま小窓へ移る場合も通常レイアウトへ戻す。
     document.addEventListener('enterpictureinpicture', () => setActive(false), true);
     document.addEventListener('webkitpresentationmodechanged', (event) => {
