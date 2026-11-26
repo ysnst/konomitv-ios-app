@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 25
     env:
       TZ: Asia/Tokyo
-      APP_VERSION: '0.3.0'
+      APP_VERSION: '0.3.1'
       BUILD_NUMBER: '${{ github.run_number }}'
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fullscreen-0.3.0-${{ github.run_number }}-${{ github.sha }}
+          name: fullscreen-0.3.1-${{ github.run_number }}-${{ github.sha }}
           path: |
             artifacts/ipa/**/*.ipa
             artifacts/ipa/**/SHA256SUMS.txt

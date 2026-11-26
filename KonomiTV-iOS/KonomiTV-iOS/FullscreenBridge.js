@@ -44,15 +44,18 @@
     window.addEventListener('pagehide', recordMedia);
     document.addEventListener('konomi-diagnostics-snapshot', () => recordMedia({type: 'snapshot', target: document}));
 
-    // 背景入りでWebKitがinline動画を止めた場合だけ、同じ動画で音声の継続を1回試す。
+    // 録画の背景入りでWebKitがinline動画を止めた場合だけ、同じ動画で音声の継続を1回試す。
     // 非アクティブ化だけでは実行しないため、Control Centerの操作と背景移行を区別する。
+    // ライブ不調の報告と背景play直後のdecodeエラー反復を受け対象外。既存の手動PiPを使う。
+    const isRecordedWatch = () => /^\/videos\/watch\/[^/]+\/?$/.test(location.pathname);
     let backgroundAudio = null;
     let isBackground = false;
     const inPiP = video => document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture';
     const clearBackgroundAudio = () => { backgroundAudio = null; isBackground = false; };
     function resumeBackgroundAudio() {
         const saved = backgroundAudio;
-        if (!isWatch()) { clearBackgroundAudio(); return; }
+        // 記憶後にSPAでライブへ遷移した場合も、旧候補から強制再開させない。
+        if (!isRecordedWatch()) { clearBackgroundAudio(); return; }
         if (!saved || saved.attempted || !isBackground || !document.hidden) return;
         const video = saved.video;
         if (!video.isConnected || video !== document.querySelector('.watch-player video') || video.currentSrc !== saved.source ||
@@ -80,7 +83,7 @@
     document.addEventListener('konomi-background-audio', event => {
         if (event.detail === 'capture') {
             clearBackgroundAudio();
-            const video = isWatch() && document.querySelector('.watch-player video');
+            const video = isRecordedWatch() && document.querySelector('.watch-player video');
             if (video && video.readyState >= 2 && !video.paused && !video.ended && !video.error && !video.muted && video.volume > 0 && !inPiP(video)) {
                 backgroundAudio = {video, source: video.currentSrc, time: performance.now(), attempted: false};
             }

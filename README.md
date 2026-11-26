@@ -20,7 +20,7 @@
 
 ## 現在の動作確認
 
-`codex/background-audio`では、PiPを使わず背景へ移ったときの音声継続を試す0.3.0検証版を開発しています。安定版mainは0.2.3のままです。背景移行直後の停止に限って同じ動画の再生を1回試し、後続の一時停止を監視して再開する処理は入れていません。iOSでの音声継続は未確認です。[方式と制限](docs/background-audio.md)を参照してください。
+`codex/background-audio`では、PiPを使わず背景へ移ったときの音声継続を試す検証版を開発しています。安定版mainは0.2.3のままです。0.3.1は背景移行直後の録画だけで同じ動画の再生を1回試し、後続の一時停止を監視して再開する処理は入れていません。0.3.0/build 10の実機報告では録画で動作し、ライブでは失敗しました。提供ログに再開直後のデコードエラーが反復しているため、ライブを自動再開の対象から外しています。ライブの背景音声は未解決で、手動PiPを維持します。[方式と制限](docs/background-audio.md)を参照してください。
 
 対象はiPhone 17 Pro / LiveContainerで、HEVC録画を中心に利用する環境です。0.2.3/build 8提供後、利用者から「現状は理想どおりの動作」との確認を受けました（2026-11-27）。自動PiPは不要との決定により対応対象から外し、手動PiPを維持します。
 
@@ -38,7 +38,7 @@
 
 Swift 5 / iOS 16以降、外部Swift依存なし。ReleaseビルドはmacOS Actionsで行います。mainへのアプリ本体・テスト・ワークフローの変更でビルドし、READMEやdocsだけの変更では起動しません。手動実行も可能です。IPA名とビルド情報には版番号・build番号・完全なコミットSHAを含めます。現在の版は0.2.3、build番号はActionsのrun_numberです。
 
-背景音声の検証版は`codex/background-audio`を指定してActionsを手動実行し、`fullscreen-0.3.0-<build>-<SHA>`成果物を使用します。同じbundle IDを使うため、既存のKonomiTV FSを更新する場合は安定版IPAも手元へ残してください。
+背景音声の検証版は`codex/background-audio`を指定してActionsを手動実行し、`fullscreen-0.3.1-<build>-<SHA>`成果物を使用します。同じbundle IDを使うため、既存のKonomiTV FSを更新する場合は安定版IPAも手元へ残してください。
 
 JavaScriptの契約テストは、固定SHAの公開PlayerControllerを読み込み、型注釈だけ除いた全画面ハンドラーを実ブラウザで実行します。テスト対象のソースは`artifacts/reference/PlayerController-v0.14.1.ts`へ取得し、`PLAYWRIGHT_MODULE`にPlaywrightのパスを指定して`node tests/fullscreen-browser.cjs`で実行します。CIはPlaywright WebKit、Windowsでは検証専用Chromiumを使用します。
 

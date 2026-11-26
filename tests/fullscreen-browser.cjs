@@ -281,6 +281,24 @@ const html = `<html><head><style>
             assert.equal(await p.evaluate(() => diagnostics.some(e => e.event === 'background-audio-rejected')), true);
             await p.close();
         });
+        await check('Live background never receives forced play, including SPA transition from recording', async () => {
+            for (const transition of [false, true]) {
+                const p = await pageFor({url: transition ? 'https://konomi.test/videos/watch/1' : 'https://konomi.test/tv/watch/gr011'});
+                await backgroundFixture(p);
+                await p.evaluate(transition => {
+                    bgPhase('capture');
+                    if (transition) history.pushState({}, '', '/tv/watch/gr011');
+                    bgPhase('background'); bgPause(); bgHide();
+                }, transition);
+                assert.equal(await p.evaluate(() => bg.calls), 0, 'Live must not enter the failing forced-resume path');
+                assert.equal(await p.evaluate(() => diagnostics.some(e => e.event.startsWith('background-audio-'))), false);
+                // 背景音声の除外で、ライブの全画面と既存PiP APIは失わない。
+                await p.click('#fullscreen');
+                assert.equal(await p.evaluate(() => store.is_fullscreen), true);
+                assert.equal(await p.evaluate(() => HTMLVideoElement.prototype.requestPictureInPicture === originalPiP), true);
+                await p.close();
+            }
+        });
         writeFileSync(resolve('artifacts/verification/browser-results.json'), JSON.stringify({browser: process.env.BROWSER || 'chromium', passed: results}, null, 2));
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
