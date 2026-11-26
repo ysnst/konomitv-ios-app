@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreFoundation
 import UIKit
 import WebKit
 
@@ -43,6 +44,9 @@ final class ViewController: UIViewController {
         }
     }
 
+    /// 遅れて返った回転エラーから、次の全画面操作を巻き戻さないための世代。
+    private var fullscreenGeneration = 0
+
     // WebView の各辺の制約。辺ごとに「安全領域に合わせるもの」と「画面端に
     // 合わせるもの」の両方を用意し、向きと全画面かどうかで使う組を切り替える
     // (updateWebViewConstraints を参照)。
@@ -57,12 +61,6 @@ final class ViewController: UIViewController {
 
     /// 現在有効にしている制約の組 (同じ組なら入れ替えないための記録)
     private var appliedConstraints: [NSLayoutConstraint] = []
-
-    /// この回の全画面で、入るときに画面の回転を行ったかどうか。
-    /// 画面が既に横向きのときに入った場合は回転していないので、終了時も
-    /// 回転まわりの後処理はせず、ステータスバーを出し直すだけでよい。
-    /// 保険 (URL 監視) で終了させる場合も、この値で後処理を分ける。
-    private var enteredWithRotation = false
 
     /// 最後に読み込んだ URL。設定で URL が変わっていたら読み直すために保持する。
     private var lastLoadedURLString: String?
@@ -140,8 +138,7 @@ final class ViewController: UIViewController {
         // 安全領域の余白は実質アイランドのある側にしか無いので、結果として
         // アイランド側だけが内側に入り、反対側は端まで使える。上下は画面端
         // まで使い、映像の高さは縮めない (2026-11-22 のユーザーの指定)。
-        // 縦向きは従来どおりで、通常時は上端だけ安全領域、全画面時は四辺とも
-        // 安全領域に合わせる。
+        // 通常の縦向きでは上端を安全領域へ合わせ、全画面中は四辺とも画面端へ広げる。
         topSafeConstraint = webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
         topEdgeConstraint = webView.topAnchor.constraint(equalTo: view.topAnchor)
         bottomSafeConstraint = webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
@@ -175,7 +172,8 @@ final class ViewController: UIViewController {
     /// 向きと全画面かどうかで、WebView の制約の組を切り替える。
     ///
     /// 組の選び方:
-    /// - 横向き (通常時・全画面時とも): 左右は安全領域に合わせ、上下は画面端
+    /// - 全画面時: 四辺とも画面端まで使う。
+    /// - 横向き・通常時: 左右は安全領域に合わせ、上下は画面端
     ///   まで使う。安全領域の左右の余白は実質ダイナミックアイランドのある側
     ///   にしか無いため、アイランド側だけがその分だけ内側に入り、左端から
     ///   出てくるメニューがアイランドに被らなくなる。反対側は端まで使え、
@@ -184,7 +182,6 @@ final class ViewController: UIViewController {
     ///   KonomiTV のページはブラウザ表示前提でステータスバー分の余白を持って
     ///   いないため、上端をそのまま貼るとヘッダー (ロゴや検索アイコンの行)
     ///   が時計・電波・電池の表示に重なってしまうため。
-    /// - 縦向き・全画面時: 四辺とも安全領域の内側に置く (従来どおり)。
     /// 安全領域の外に出る余白は、ビューの背景色 (KonomiTV のテーマ色) で埋まる。
     ///
     /// 呼び出しの機会は、構築時 (viewDidLoad)、全画面の切り替え時
@@ -195,10 +192,11 @@ final class ViewController: UIViewController {
         guard topSafeConstraint != nil else { return }
         let targetSize = size ?? view.bounds.size
         let selected: [NSLayoutConstraint]
-        if targetSize.width > targetSize.height {
+        if isNativeFullscreen {
+            // 全画面では WebView を四辺まで広げる。操作部品の安全領域は Web 側に任せる。
+            selected = [topEdgeConstraint, bottomEdgeConstraint, leadingEdgeConstraint, trailingEdgeConstraint]
+        } else if targetSize.width > targetSize.height {
             selected = [topEdgeConstraint, bottomEdgeConstraint, leadingSafeConstraint, trailingSafeConstraint]
-        } else if isNativeFullscreen {
-            selected = [topSafeConstraint, bottomSafeConstraint, leadingSafeConstraint, trailingSafeConstraint]
         } else {
             selected = [topSafeConstraint, bottomEdgeConstraint, leadingEdgeConstraint, trailingEdgeConstraint]
         }
@@ -268,7 +266,12 @@ final class ViewController: UIViewController {
     private static func normalizedURLString(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return trimmed.contains("://") ? trimmed : "https://" + trimmed
+        let normalized = trimmed.contains("://") ? trimmed : "https://" + trimmed
+        guard let url = URL(string: normalized),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil else { return nil }
+        return normalized
     }
 
     /// 保存されている URL があれば開き、無ければ入力画面を出す。
@@ -283,8 +286,55 @@ final class ViewController: UIViewController {
 
     private func loadHome() {
         guard let urlString = Self.homeURLString(), let url = URL(string: urlString) else { return }
+        resetFullscreen()
+        installFullscreenScript(for: url)
         lastLoadedURLString = urlString
         webView.load(URLRequest(url: url))
+    }
+
+    /// 接続先変更時にスクリプトも作り直す。認証・外部サイトは JS 冒頭の origin 判定で除外する。
+    private func installFullscreenScript(for url: URL) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        guard let resource = Bundle.main.url(forResource: "FullscreenBridge", withExtension: "js"),
+              let source = try? String(contentsOf: resource, encoding: .utf8),
+              var origin = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            print("[KonomiTV-iOS] Fullscreen bridge resource unavailable")
+            return
+        }
+        origin.path = ""
+        origin.query = nil
+        origin.fragment = nil
+        // URL を JavaScript 文字列へ直接連結せず JSON で符号化する。
+        guard let originString = origin.string,
+              let data = try? JSONSerialization.data(withJSONObject: [originString]),
+              let argument = String(data: data, encoding: .utf8) else { return }
+        controller.addUserScript(WKUserScript(
+            source: "\(source)(\(argument)[0]);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+    }
+
+    /// Web とネイティブの両方を通常表示へ戻す。再生・Cookie・現在位置は変更しない。
+    func resetFullscreen() {
+        if isTrustedWatchURL(webView?.url) {
+            webView?.evaluateJavaScript("document.dispatchEvent(new Event('konomi-native-fullscreen-reset'))", completionHandler: nil)
+        }
+        setNativeFullscreen(false)
+    }
+
+    private func isTrustedOriginURL(_ url: URL?) -> Bool {
+        guard let url, let saved = Self.homeURLString(), let home = URL(string: saved),
+              url.scheme?.lowercased() == home.scheme?.lowercased(),
+              url.host?.lowercased() == home.host?.lowercased(),
+              (url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)) == (home.port ?? (home.scheme?.lowercased() == "https" ? 443 : 80)) else { return false }
+        return true
+    }
+
+    private func isTrustedWatchURL(_ url: URL?) -> Bool {
+        guard isTrustedOriginURL(url), let url else { return false }
+        return url.path.range(of: "^/(tv|videos)/watch/[^/]+/?$", options: .regularExpression) != nil
     }
 
     // MARK: - URL の入力画面
@@ -292,6 +342,7 @@ final class ViewController: UIViewController {
     /// URL の入力画面を出す。必要なときにだけ組み立てる。
     /// 設定アプリ側で入れられた値があれば、それを入力欄の初期値として見せる。
     private func showURLInput() {
+        resetFullscreen()
         if urlInputView == nil {
             buildURLInputView()
         }
@@ -391,36 +442,23 @@ final class ViewController: UIViewController {
             return
         }
         print("[KonomiTV-iOS] Fullscreen signal applied: enter=\(enter)")
+        fullscreenGeneration += 1
         if enter {
             isOrientationRestorePending = false
-            // 開始時点で画面が既に横向きかどうかで、入り方を分ける。
-            // 既に横向きなら、端末を横にして開いて右の情報パネルを隠すだけで
-            // 映像はほぼ画面いっぱいになっており、全画面のために回す必要は
-            // ない (2026-11-22 の実機確認)。この場合は回転の要求も許可向きの
-            // 変更も一切せず、ステータスバーを隠すだけにする。回転しなかった
-            // ことは enteredWithRotation に残し、終了時の後処理を分ける。
+            // 既に横向きなら余分な回転要求を出さず、横向きの許可だけ固定する。
             let current = view.window?.windowScene?.interfaceOrientation
             if let current, current.isLandscape {
-                enteredWithRotation = false
+                // 横向きで開始しても、解除時には必ず縦へ戻す。
                 isNativeFullscreen = true
-                print("[KonomiTV-iOS] Enter fullscreen: already landscape, status bar only (no rotation)")
+                AppDelegate.orientationLock = .landscape
+                refreshSupportedOrientations()
             } else {
-                enteredWithRotation = true
                 isNativeFullscreen = true
                 enterLandscape()
             }
         } else {
-            let rotated = enteredWithRotation
-            enteredWithRotation = false
             isNativeFullscreen = false
-            if rotated {
-                exitToPortrait()
-            } else {
-                // 回転して入っていないので、戻す回転も要らない。
-                // ステータスバーを出し直すだけでよい (isNativeFullscreen の
-                // 変更で連動済み)。許可向きの復帰保留も立てない。
-                print("[KonomiTV-iOS] Exit fullscreen: no rotation was used, status bar only")
-            }
+            exitToPortrait()
         }
     }
 
@@ -460,9 +498,8 @@ final class ViewController: UIViewController {
         }
     }
 
-    /// 全画面の終了 (回して入った場合): 縦向きへの切り替えを OS に頼み、
-    /// 許可向きの復帰は保留する。回さずに入った場合はここ自体が呼ばれず、
-    /// ステータスバーを出し直すだけで終わる (setNativeFullscreen 参照)。
+    /// 全画面の終了時は開始姿勢にかかわらず縦向きへ戻す。
+    /// 許可向きの復帰は保留する。
     ///
     /// 許可向きを広げるだけでは、いちど横向きに切り替えた画面は縦へ戻らない
     /// (2026-11-22 実機で確認)。そのため開始時と対称に、縦向きへの切り替え
@@ -487,13 +524,20 @@ final class ViewController: UIViewController {
         if #available(iOS 16.0, *) {
             guard let scene = view.window?.windowScene else {
                 print("[KonomiTV-iOS] Geometry update (\(label)) skipped: no window scene")
+                if isNativeFullscreen { resetFullscreen() }
                 return
             }
             let orientations = Self.mask(for: target)
+            let generation = fullscreenGeneration
+            setNeedsUpdateOfSupportedInterfaceOrientations()
             print("[KonomiTV-iOS] Geometry update requested: \(label)")
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations)) { error in
+                guard generation == self.fullscreenGeneration else { return }
                 print("[KonomiTV-iOS] Geometry update (\(label)) rejected: \(error)")
-                guard retryOnFailure else { return }
+                guard retryOnFailure else {
+                    self.resetFullscreen()
+                    return
+                }
                 // 許可向きの再評価を先に促してから、1回だけ送り直す。
                 self.setNeedsUpdateOfSupportedInterfaceOrientations()
                 print("[KonomiTV-iOS] Geometry update retrying once: \(label)")
@@ -553,10 +597,7 @@ final class ViewController: UIViewController {
             if self.isNativeFullscreen {
                 // 横向きへ移り終えたら、許可向きを横向きの組 (左右両方) へ広げる。
                 // 全画面中に端末をひっくり返しても追従できるようにするため。
-                // ただし、回して入った場合だけ。既に横向きで回さずに入った
-                // 場合は許可向きを一切変えない約束なので、ここでも触らない
-                // (全画面中に端末を回して大きさが変わっても同様)。
-                if self.enteredWithRotation, size.width > size.height, AppDelegate.orientationLock != .landscape {
+                if size.width > size.height, AppDelegate.orientationLock != .landscape {
                     AppDelegate.orientationLock = .landscape
                     print("[KonomiTV-iOS] Orientation lock widened to landscape (both sides)")
                     self.refreshSupportedOrientations()
@@ -574,11 +615,10 @@ final class ViewController: UIViewController {
     /// の2形だけ (Web 側のルーター定義で確認済み) で、それ以外へ移ったことは
     /// 一意に判定できる。Web 側の終了の合図が出なかった場合の受け皿になる。
     private func exitFullscreenIfLeftWatchPage() {
-        guard isNativeFullscreen, let path = webView.url?.path else { return }
-        let isWatchPage = path.hasPrefix("/tv/watch/") || path.hasPrefix("/videos/watch/")
-        if !isWatchPage {
-            print("[KonomiTV-iOS] Left watch page (\(path)) while in fullscreen; exiting as a safeguard")
-            setNativeFullscreen(false)
+        guard isNativeFullscreen else { return }
+        if !isTrustedWatchURL(webView.url) {
+            print("[KonomiTV-iOS] Left trusted watch page; exiting fullscreen")
+            resetFullscreen()
         }
     }
 
@@ -611,13 +651,28 @@ extension ViewController: WKScriptMessageHandler {
         didReceive message: WKScriptMessage
     ) {
         guard message.name == Self.bridgeName,
+              message.webView === webView,
+              message.frameInfo.isMainFrame,
+              isTrustedOriginURL(message.frameInfo.request.url),
+              isTrustedWatchURL(webView.url),
               let body = message.body as? [String: Any],
-              let type = body["type"] as? String else {
+              body.count == 2,
+              let type = body["type"] as? String,
+              type == "fullscreen",
+              let value = body["enter"] as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else {
             return
         }
+        // frame URL に加え WebKit の securityOrigin も検証する (iframe・認証ドメインを除外)。
+        let origin = message.frameInfo.securityOrigin
+        guard let frameURL = message.frameInfo.request.url,
+              origin.protocol.lowercased() == frameURL.scheme?.lowercased(),
+              origin.host.lowercased() == frameURL.host?.lowercased(),
+              (origin.port == 0 ? (origin.protocol.lowercased() == "https" ? 443 : 80) : origin.port)
+                == (frameURL.port ?? (frameURL.scheme?.lowercased() == "https" ? 443 : 80)) else { return }
         switch type {
         case "fullscreen":
-            let enter = (body["enter"] as? Bool) ?? false
+            let enter = value.boolValue
             // 受信の記録を残す (実機確認で、失敗した回と突き合わせられるように)。
             print("[KonomiTV-iOS] Bridge message received: fullscreen enter=\(enter)")
             setNativeFullscreen(enter)
@@ -630,6 +685,14 @@ extension ViewController: WKScriptMessageHandler {
 // MARK: - 読み込みの可否
 
 extension ViewController: WKNavigationDelegate {
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        resetFullscreen()
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        setNativeFullscreen(false)
+    }
 
     /// このアプリは KonomiTV を開く専用なので、遷移はすべて許可する。
     /// (外部リンクの扱い分けは、必要になった時点でここに足す)

@@ -1,107 +1,27 @@
-# konomitv-ios-app — KonomiTV 用 iOS ラッパー
+# KonomiTV FS — サーバー無改造のiOSラッパー
 
-[KonomiTV](https://github.com/tsukumijima/KonomiTV) を iPhone で使うための、薄い WKWebView ラッパーアプリ。
-テレビ用ラッパー (Android TV 版) の iOS 版という位置づけで、ブラウザを介さず、ホーム画面のアイコンから直接 KonomiTV を開けるようにする。
+[tatsuya0902/konomitv-ios-app](https://github.com/tatsuya0902/konomitv-ios-app) を基にした、WKWebViewの全画面対応版です。既存のネイティブ版KonomiTV Viewerとは独立したプロジェクトです。本家の履歴・MITライセンスを保持しています。
 
-Web (Safari / PWA) では届かなかった次の3点を、アプリ側で担う。
+既存のKonomiTV全画面ボタンから、字幕・実況・操作部品を含むWebプレイヤー全体を表示し、iOSの横向き・ステータスバー非表示へ接続します。サーバーの橋渡しパッチ適用や再ビルドは不要です。動画専用のiOS標準全画面へは移しません。
 
-1. **正規の全画面** — 全画面ボタンを押したら、iOS のステータスバーまで消える。
-2. **PiP (ピクチャー・イン・ピクチャー)** — 映像を小窓に出して、他のアプリを使いながら再生を続ける。
-3. **スクリーンショットが横向きで撮れる** — 全画面中は OS の画面の向き自体が横になるため、撮った画像もそのまま横向きになる。
+現在は実機確認前の試作です。公開KonomiTV v0.14.1のFullscreen API契約を対象とし、利用中のサーバーが同じ実装かは別途確認が必要です。HEVC録画・生放送・PiPは元ラッパーでの利用者確認を基準とし、この改造版での回帰確認は未実施です。
 
-> 状態: 2026-11-22 に開発し、開発者の環境では実機で使っていたもの。一度公開を取り下げたが、2026-11-27 に再公開した。再公開版は同じソースからのビルドで、版番号はリポジトリを作り直したため 0.1 から数え直しになる。
+## 導入
 
-## 2つのアプリの位置づけ
+GitHub Actionsの`Build unsigned fullscreen IPA`が成功した実行から、`fullscreen-0.2.0-<build>-<SHA>`成果物をダウンロードします。zip内の未署名IPAをLiveContainerへ導入してください。公開リリースや固定タグへの自動アップロードは行いません。
 
-KonomiTV を iPhone で使うアプリは、この ラッパー版「KonomiTV」 と、ネイティブ版 [KonomiTV Viewer](https://github.com/tatsuya0902/konomitv-viewer) の2つがある。
+表示名は`KonomiTV FS`、bundle IDは`jp.ysnst.konomitv.fullscreen`です。元アプリと区別するため別IDを使用します。初回は接続先URLを入力し、Cloudflare Accessへ再ログインしてください。元アプリの設定・Cookieは移行しません。元アプリの領域を消したり、データ領域を共有したりしないでください。
 
-- **ラッパー版 (このアプリ)** — 中身は Web 版そのもの。**本家の見た目そのままが良い人**、余計な作り直しのない方が良い人向け。見た目と操作は Web 版に追随する。
-- **ネイティブ版 (KonomiTV Viewer)** — 再生をアプリ側で担う作り。**PiP やオフライン再生など、ネイティブならではの機能が要る人**向け。見た目は Web 版に寄せてあるが、細部は作り直しになる。
+入力したURLは従来と同じ`konomi_url`キーに保存します。設定アプリからも変更できます。CookieはWKWebViewの永続ストアをそのまま使用します。
 
-## 前提条件 (サーバー側)
+## 開発と検証
 
-- **表示と視聴だけなら、素の KonomiTV でよい。** このアプリは Web 版を開く薄い入れ物なので、サーバーのアドレスを指定すればそのまま使える。
-- **全画面 (OS ごと横向き・ステータスバー消去) と PiP の橋渡しには、サーバー側の KonomiTV に橋渡しパッチが必要。** パッチは [konomitv-customizations](https://github.com/tatsuya0902/konomitv-customizations) の `ios-app-bridge` (このリポジトリの `konomitv-client-bridge.patch` がその元)。パッチが無いサーバーでは、表示と視聴はできるが、全画面ボタンと PiP は Web 版の範囲の動きになる。
+Swift 5 / iOS 16以降、外部Swift依存なし。ReleaseビルドはmacOS Actionsで行います。ワークフローは作業ブランチのコード変更で1回起動し、IPA・SHA-256・ビルド元完全SHA・Xcodeログを保存します。版は0.2.0、build番号はActionsのrun_numberです。
 
-## 仕組み
+JavaScriptの契約テストは、固定SHAの公開PlayerControllerを読み込み、型注釈だけ除いた全画面ハンドラーを実ブラウザで実行します。テスト対象のソースは`artifacts/reference/PlayerController-v0.14.1.ts`へ取得し、`PLAYWRIGHT_MODULE`にPlaywrightのパスを指定して`node tests/fullscreen-browser.cjs`で実行します。CIはPlaywright WebKit、Windowsでは検証専用Chromiumを使用します。
 
-### 全画面 (要件1・3)
-
-- アプリには Safari のようなブラウザの UI が元々無い。画面に出る余分なものは iOS のステータスバーだけなので、それを隠せば全画面になる。
-- KonomiTV 側の全画面ボタンが押されたら、ページからアプリへ「全画面に入る／出る」の通知が届く (橋渡し用のパッチ `konomitv-client-bridge.patch`、形式は `{type: "fullscreen", enter: true/false}`)。
-- アプリは通知を受けて、ステータスバーとホームインジケーターを隠し、**ウィンドウシーン (OS の画面) 自体の向きを横に切り替える**。
-- Web 版の擬似フルスクリーンは、縦持ちのまま画面の中身だけを CSS で90度回して見せていた。そのためスクリーンショットを撮ると「縦の枠の中に横向きの絵」になっていた。アプリ版は OS ごと横向きになるので、**スクリーンショットも横向きの画像として撮れる** (要件3)。
-
-### PiP (要件2)
-
-- WKWebView は iOS 9 の頃から HTML5 映像の PiP に対応している。アプリ側は WebView の設定で PiP を許可し (`allowsPictureInPictureMediaPlayback`)、音声セッションを「再生」カテゴリにしておく。
-- KonomiTV 側の PiP は、Chrome 向けの Document Picture-in-Picture が使える環境でのみ動きを乗っ取る作りで、無い環境では標準の PiP がそのまま残る (コード確認済み)。
-- ただし iOS の WebKit には標準の `requestPictureInPicture()` が無いため、橋渡しパッチで、iOS 独自の `webkitSetPresentationMode('picture-in-picture')` へつなぐ補いを足してある。
-
-### 制約 (PiP で付いていかないもの)
-
-- PiP の小窓に出るのは**映像だけ**。KonomiTV の字幕と流れるコメントは、映像の上に Web の画面部品として重ねているものなので、小窓には付いていかない見込み。
-- 同じ理由で、PiP 中はプレイヤーのボタン類も小窓には出ない (iOS 標準の再生・一時停止などの操作だけになる)。
-
-## 開く URL
-
-既定の URL は無い。初めて起動したとき (URL が未設定のとき) は、アプリ内に URL の入力画面が出るので、開きたい KonomiTV の URL を入れる。入力した URL は保存され、次回からはそのまま開く。`https://` 等の方式が付いていなければ、自動で `https://` が補われる。
-
-あとから変えたい場合は、iPhone の「設定」アプリ →「KonomiTV」→「KonomiTV の URL」から変更できる。空欄にすると、次回起動時にまた入力画面が出る。変更はアプリに戻ったときに反映される。
-
-なお、接続先の構成によっては IP アドレス直打ちでは表示できない場合がある (ホスト名で開く必要がある)。
-
-## ビルド
-
-手元に Mac が無くても、GitHub Actions の Mac でビルドできる。
-
-- `.github/workflows/build.yml` が、署名なしでビルドし、**署名なし IPA** を成果物 (Artifacts) として出す。あわせて、固定タグのリリース (`sideload-latest`) にも最新の IPA が1つだけ置かれる (取り方はこちらが本線)。
-- 版番号はビルドの実行番号から自動で決まる (`0.<実行番号>` で、アプリ本体・リリース説明・IPA のファイル名に同じ番号が入る)。
-- プロジェクトは `.xcodeproj` を直接置く形にした。生成ツール (XcodeGen 等) を CI に持ち込まずに済み、ファイルが文章のまま差分で追えるため。
-
-## 実機への入れ方 (試作はサイドロードが本線)
-
-試作段階では、**無料のサイドロード**で入れる (2026-11-22 の決定)。
-流れは次のとおり。
-
-1. リリース (`sideload-latest`) から署名なし IPA をダウンロードする。
-2. AltStore か SideStore で IPA を選び、本人の無料 Apple ID で署名して iPhone に入れる (署名はサイドロード側が行う)。LiveContainer の中へ入れる方法でも動く (開発者の環境はこちらで使っていた)。
-3. 7日ごとに署名の更新が要る (下記の比較を参照)。LiveContainer の場合はその仕組みに従う。
-
-### AltStore と SideStore の違い
-
-| | AltStore | SideStore |
-|---|---|---|
-| 必要なもの | 同じ Wi-Fi 上で AltServer を動かすパソコン (Mac / Windows) が要る | 初期設定のときだけパソコンが要る |
-| 署名の更新 | パソコンと同じ Wi-Fi にいるときに更新する | 端末側だけで更新できる (端末内に更新の仕組みを持つ) |
-| 初期設定の手間 | 少なめ (パソコン側の案内に沿う) | やや多い (端末側の設定ファイルを最初に作る) |
-| 署名の期限 | 7日で切れる。切れる前に更新すれば使い続けられる | 同じく7日 |
-
-共通の制約 (無料 Apple ID の決まり):
-
-- 署名は7日で切れる。切れたらアプリが開けなくなるので、その前に更新する。
-- 無料の範囲で入れられるアプリの数や、週に登録できるアプリ ID の数には上限がある。
-- 再署名のときにバンドル ID は無料アカウント側のものへ置き換わる。このアプリは固定のバンドル ID に依存した作り (アプリ間の共有領域や鍵の共有など) をしていないので、置き換わっても動く。ただしバンドル ID が変わると保存済みの設定 (開く URL) は引き継がれないため、入れ直しのときは同じバンドル ID のまま上書きするのがよい。
-
-### 将来の選択肢
-
-- Apple Developer Program (有料) に入れば、署名は1年持ち、TestFlight で配る形も取れる。7日ごとの更新から解放される代わりに年額がかかる。試作で手応えを見てから判断する想定で、ワークフローも署名あり配布は将来用に分けてある (現行の `build.yml` は署名なし専用)。
-
-## 実機での確認について
-
-開発者の環境 (iPhone + 橋渡しパッチ入りの KonomiTV) では、次を確認済み。
-
-- アプリが起動し、KonomiTV が表示されること
-- 全画面ボタンでステータスバーが消え、OS ごと横向きになること。もう一度押して戻れること
-- 全画面中に撮ったスクリーンショットが横向きのまま見られること
-- 画面端からの横スワイプで戻る・進むができること、接続先 URL の入力画面と保存が効くこと
-
-PiP は端末や環境で差が出るため、各自の環境で確認してほしい。
-
-- PiP ボタンから小窓が出るか。出ない場合は、再生中にアプリを切り替えたときの自動 PiP が効くか
-- PiP の小窓で再生が続き、アプリに戻ると元の画面へ復帰するか
-- ライブと録画の両方、画質を切り替えた後も PiP が使えるか
+[調査と来歴](docs/baseline.md)、[要件](docs/requirements.md)、[構成](docs/architecture.md)、[実機チェックリスト](docs/device-checklist.md)を参照してください。`work-result-v0.md`、`build-result-v1.md`、`konomitv-client-bridge.patch`は本家の過去記録・参考資料で、今回のサーバー操作手順ではありません。
 
 ## ライセンス
 
-MIT License (LICENSE を参照)。
+MIT License。元の著作権表示は[LICENSE](LICENSE)を参照してください。

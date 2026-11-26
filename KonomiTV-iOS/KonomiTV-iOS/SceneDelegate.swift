@@ -24,4 +24,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // URL の再読み込み自体は ViewController.viewWillAppear で判定する。
         AppDelegate.activateAudioSession()
     }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        // PiP へ移る動画は維持し、背景に残る全画面表示だけ解除する。
+        (window?.rootViewController as? ViewController)?.resetFullscreen()
+    }
 }

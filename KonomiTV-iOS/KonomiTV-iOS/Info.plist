@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>KonomiTV</string>
+	<string>KonomiTV FS</string>
 	<!-- GENERATE_INFOPLIST_FILE = NO のため自動では付かない。LiveContainer 等はこのキーで実行ファイル名を引くので必須 -->
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>

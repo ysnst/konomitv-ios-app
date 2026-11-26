@@ -1,111 +1,82 @@
-name: Build (unsigned IPA)
-
-# 試作の本線は「署名なし IPA を作り、本人の無料 Apple ID でサイドロード時に署名する」流れ。
-# このワークフローは署名を一切しない (証明書・プロファイルは使わない)。
-# 有料プランでの TestFlight 配布は、将来このファイルとは別のワークフローに分ける。
+name: Build unsigned fullscreen IPA
 
 on:
   push:
-    branches: [main]
-    # 記録（build-result-v1.md）だけの変更ではビルドを回さない。
-    # 変更の push で1回＋記録の push でもう1回と、版番号が2つ進んで
-    # 報告した版がリリースに残らなくなるのを防ぐ（2026-11-22）。
-    # 記録と他のファイルを一緒に送った場合は通常どおりビルドする。
-    paths-ignore:
-      - 'build-result-v1.md'
-  pull_request:
+    branches: [codex/serverless-fullscreen]
+    paths: ['KonomiTV-iOS/**', 'tests/**', '.github/workflows/build.yml']
   workflow_dispatch:
 
-# 固定タグのリリースへ IPA を置くため、リリースへの書き込み権限が要る。
+# Actions成果物だけを保存し、タグや公開リリースは作らない。
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    name: Build unsigned IPA
-    runs-on: macos-latest
-    # 成果物 zip に記録される時刻がビルド機の現地時刻（世界標準時）の壁時計になり、
-    # 解凍したときに日本時間とずれて見えるのを防ぐため、ジョブ全体を日本時間にする。
+    runs-on: macos-15
+    timeout-minutes: 25
     env:
       TZ: Asia/Tokyo
+      APP_VERSION: '0.2.0'
+      BUILD_NUMBER: '${{ github.run_number }}'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set timezone to Asia/Tokyo
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test injected script against pinned public client
+        env:
+          BROWSER: webkit
         run: |
-          sudo systemsetup -settimezone "Asia/Tokyo"
-          systemsetup -gettimezone
-          date
-
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: Build (no code signing)
+          mkdir -p artifacts/reference artifacts/verification
+          curl --fail --location --retry 2 'https://raw.githubusercontent.com/tsukumijima/KonomiTV/0a32188274b81c1e7bed642474b208bd2a543a6b/client/src/services/player/PlayerController.ts' -o artifacts/reference/PlayerController-v0.14.1.ts
+          npm install --prefix artifacts/tooling --no-audit --no-fund playwright@1.65.1
+          export PLAYWRIGHT_MODULE="$PWD/artifacts/tooling/node_modules/playwright"
+          node artifacts/tooling/node_modules/playwright/cli.js install webkit
+          node --check KonomiTV-iOS/KonomiTV-iOS/FullscreenBridge.js
+          node tests/fullscreen-browser.cjs
+      - name: Release build without signing
         run: |
+          set -o pipefail
+          xcodebuild -version | tee artifacts/verification/xcode-version.txt
           xcodebuild build \
             -project KonomiTV-iOS/KonomiTV-iOS.xcodeproj \
             -scheme KonomiTV-iOS \
             -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
-
-      # 版番号はビルドのたびに自動で進める（人手で上げる段は作らない）。
-      # 元は Actions の実行番号（github.run_number）で、表示版は「0.<実行番号>」、
-      # 内部のビルド番号も同じ実行番号。アプリ本体・リリース説明・IPA のファイル名の
-      # 3か所へ同じ番号を入れて、「何を入れたか」が見分けられるようにする（2026-11-22）。
-      - name: Package unsigned IPA
-        env:
-          APP_VERSION: "0.${{ github.run_number }}"
-          BUILD_NUMBER: "${{ github.run_number }}"
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath artifacts/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$APP_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | tee artifacts/verification/release-build.log
+      - name: Package and identify unsigned IPA
         run: |
-          mkdir -p build/Payload
-          cp -R "build/DerivedData/Build/Products/Release-iphoneos/KonomiTV-iOS.app" build/Payload/
-          PLIST="build/Payload/KonomiTV-iOS.app/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
-          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
-          cd build
-          zip -r "KonomiTV-iOS-unsigned-$APP_VERSION.ipa" Payload
-          ls -lh "KonomiTV-iOS-unsigned-$APP_VERSION.ipa"
-
-      - name: Upload unsigned IPA
+          set -euo pipefail
+          OUT="artifacts/ipa/$APP_VERSION-$BUILD_NUMBER-$GITHUB_SHA"
+          mkdir -p "$OUT/Payload"
+          cp -R artifacts/DerivedData/Build/Products/Release-iphoneos/KonomiTV-iOS.app "$OUT/Payload/"
+          APP="$OUT/Payload/KonomiTV-iOS.app"
+          test -s "$APP/FullscreenBridge.js"
+          test -s "$APP/KonomiTV-iOS"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist"
+          test ! -d "$APP/_CodeSignature"
+          IPA="KonomiTV-Fullscreen-$APP_VERSION-$BUILD_NUMBER-$GITHUB_SHA-unsigned.ipa"
+          (cd "$OUT" && zip -qr "$IPA" Payload)
+          shasum -a 256 "$OUT/$IPA" | tee "$OUT/SHA256SUMS.txt"
+          python3 - <<'PY'
+          import json, os, pathlib
+          out = pathlib.Path('artifacts/ipa') / f"{os.environ['APP_VERSION']}-{os.environ['BUILD_NUMBER']}-{os.environ['GITHUB_SHA']}"
+          metadata = {key: os.environ[key] for key in ['APP_VERSION','BUILD_NUMBER','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_REPOSITORY']}
+          metadata['upstream_baseline'] = 'ba809b4451095e8c53efc1b8c1dce820c0587eb9'
+          metadata['actions_url'] = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          (out / 'build-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          PY
+      - name: Upload IPA and verification evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: KonomiTV-iOS-unsigned-ipa
-          path: build/KonomiTV-iOS-unsigned-0.${{ github.run_number }}.ipa
+          name: fullscreen-0.2.0-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            artifacts/ipa/**/*.ipa
+            artifacts/ipa/**/SHA256SUMS.txt
+            artifacts/ipa/**/build-metadata.json
+            artifacts/verification/
           if-no-files-found: error
-
-      # 成果物 zip は解凍すると IPA の時刻が世界標準時の数字で出て不便だったため、
-      # 取り方の本線は「固定タグのリリースに IPA をそのまま置く」形に切り替えた（2026-11-22）。
-      # 毎回のビルドで同じリリースの中身（IPA と説明）を差し替える。
-      # IPA のファイル名には版番号が入るため、--clobber では名前違いの古い IPA が
-      # 差し替わらずに残ってしまう。置く前に既存の IPA 資産をすべて消し、
-      # 常に「最新の IPA が1つだけ」になるようにする（2026-11-22）。
-      # Source code の自動資産は .ipa で終わらないので、この削除には掛からない。
-      - name: Publish IPA to fixed release
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="sideload-latest"
-          IPA="build/KonomiTV-iOS-unsigned-0.${{ github.run_number }}.ipa"
-          NOTES="版番号: 0.${{ github.run_number }}
-          ビルド日時（日本時間）: $(date '+%Y/%m/%d %H:%M')
-          Actions 実行 ID: ${{ github.run_id }}
-          実行ページ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" --title "最新の試作用IPA" --notes "$NOTES" --prerelease
-          else
-            gh release create "$TAG" --title "最新の試作用IPA" --notes "$NOTES" --prerelease
-          fi
-          gh release view "$TAG" --json assets --jq '.assets[].name | select(endswith(".ipa"))' | while IFS= read -r asset; do
-            echo "Deleting old IPA asset: $asset"
-            gh release delete-asset "$TAG" "$asset"
-          done
-          gh release upload "$TAG" "$IPA" --clobber
-          gh release view "$TAG"
