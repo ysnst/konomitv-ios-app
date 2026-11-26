@@ -44,6 +44,59 @@
     window.addEventListener('pagehide', recordMedia);
     document.addEventListener('konomi-diagnostics-snapshot', () => recordMedia({type: 'snapshot', target: document}));
 
+    // 背景入りでWebKitがinline動画を止めた場合だけ、同じ動画で音声の継続を1回試す。
+    // 非アクティブ化だけでは実行しないため、Control Centerの操作と背景移行を区別する。
+    let backgroundAudio = null;
+    let isBackground = false;
+    const inPiP = video => document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture';
+    const clearBackgroundAudio = () => { backgroundAudio = null; isBackground = false; };
+    function resumeBackgroundAudio() {
+        const saved = backgroundAudio;
+        if (!isWatch()) { clearBackgroundAudio(); return; }
+        if (!saved || saved.attempted || !isBackground || !document.hidden) return;
+        const video = saved.video;
+        if (!video.isConnected || video !== document.querySelector('.watch-player video') || video.currentSrc !== saved.source ||
+            video.ended || video.error || video.muted || video.volume === 0 || inPiP(video) ||
+            navigator.audioSession?.state === 'interrupted' || performance.now() - saved.time > 2500) {
+            clearBackgroundAudio();
+            return;
+        }
+        // hiddenと背景通知が揃った最初の観測だけを使う。既に継続中なら候補を捨て、
+        // 後からロック画面等で押された一時停止を背景停止と誤認しない。
+        if (!video.paused) { clearBackgroundAudio(); return; }
+        // 再生が拒否された場合も再試行しない。以後の一時停止操作を上書きしないため。
+        saved.attempted = true;
+        recordMedia({type: 'background-audio-attempt', target: video});
+        try {
+            Promise.resolve(video.play()).then(() => {
+                if (backgroundAudio === saved) recordMedia({type: 'background-audio-started', target: video});
+            }, () => {
+                if (backgroundAudio === saved) recordMedia({type: 'background-audio-rejected', target: video});
+            });
+        } catch {
+            recordMedia({type: 'background-audio-rejected', target: video});
+        }
+    }
+    document.addEventListener('konomi-background-audio', event => {
+        if (event.detail === 'capture') {
+            clearBackgroundAudio();
+            const video = isWatch() && document.querySelector('.watch-player video');
+            if (video && video.readyState >= 2 && !video.paused && !video.ended && !video.error && !video.muted && video.volume > 0 && !inPiP(video)) {
+                backgroundAudio = {video, source: video.currentSrc, time: performance.now(), attempted: false};
+            }
+        } else if (event.detail === 'background') {
+            isBackground = true;
+            resumeBackgroundAudio();
+        } else if (event.detail === 'foreground') clearBackgroundAudio();
+    });
+    document.addEventListener('pause', event => {
+        if (event.target !== backgroundAudio?.video) return;
+        // 背景入りの通知前のpauseは利用者/ページ側の停止として尊重する。
+        if (!isBackground) backgroundAudio = null;
+    }, true);
+    document.addEventListener('visibilitychange', resumeBackgroundAudio);
+    window.addEventListener('pagehide', clearBackgroundAudio);
+
     function emit() {
         // 公開 PlayerController の既存ハンドラーに is_fullscreen を更新させる。
         // Vue/Pinia の内部オブジェクトや動画の再生状態には触れない。
@@ -62,6 +115,7 @@
     }
 
     function uninstall() {
+        clearBackgroundAudio();
         if (!installed) return;
         setActive(false);
         installed.removeListener?.();

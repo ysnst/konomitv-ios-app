@@ -10,6 +10,11 @@ struct DiagnosticsChecks {
         ]
         let valid: [String: Any] = ["type": "mediaDiagnostic", "event": "pause", "state": state]
         precondition(PlaybackDiagnostics.recordWebMessage(valid))
+        for event in ["background-audio-attempt", "background-audio-started", "background-audio-rejected"] {
+            var message = valid
+            message["event"] = event
+            precondition(PlaybackDiagnostics.recordWebMessage(message))
+        }
         // 診断経路をURL・Cookie・自由文のログ出力口として使わせない。
         var invalid = valid
         invalid["url"] = "https://private.invalid/?token=secret"

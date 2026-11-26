@@ -17,3 +17,9 @@ MutationObserverはwatchコンテナの生成・破棄とハンドラー再生�
 0.2.2で停止順序を調べる診断を追加。既存konomiNativeへ固定スキーマのmediaDiagnosticを追加し、送信元検証後に数値・Boolean・既知列挙値だけを300件まで保持する。Nativeの音声通知/lifecycleと同じJSONへ記録し、利用者の3本指長押しで共有する。0.2.3は実機ログに基づき復帰時の音声セッション再設定を撤去し、設定を起動時だけに限定した。再生・PiP APIの挙動は変えず診断も維持する。根拠・記録手順はdiagnostics.mdを参照。
 
 配信はActions Artifactsのみ。公開release/tagの作成・既存資産の上書きは行わない。IPA名とメタデータにバージョン/build番号/完全SHAを含める。
+
+## 背景音声の検証版（0.3.0）
+
+SceneDelegateの非アクティブ通知で再生中の動画を記憶し、実際の背景通知とdocument.hiddenが揃った最初の観測時にだけ、停止済みなら同じvideoのplayを1回試す。開始前に停止していた動画、PiP、既知の音声割り込み、動画やsourceの交換、期限切れは除外する。既に再生継続中なら候補を破棄し、後続のpauseから再開しない。前景復帰・視聴ページ離脱で候補を破棄する。音声セッションの再取得、動画の移動、別プレイヤー、全画面の変更は行わない。
+
+これはFullscreen APIの処理とは別の限定的な例外で、元のvideo.playメソッドを置き換えない。詳細とiOSで未確認の制約はbackground-audio.mdを参照。

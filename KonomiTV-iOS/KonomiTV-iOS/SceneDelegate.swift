@@ -28,14 +28,17 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneWillResignActive(_ scene: UIScene) {
         PlaybackDiagnostics.record("native.sceneWillResignActive")
+        (window?.rootViewController as? ViewController)?.notifyBackgroundAudio("capture")
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         PlaybackDiagnostics.record("native.sceneDidEnterBackground")
+        (window?.rootViewController as? ViewController)?.notifyBackgroundAudio("background")
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) {
         PlaybackDiagnostics.record("native.sceneWillEnterForeground")
+        (window?.rootViewController as? ViewController)?.notifyBackgroundAudio("foreground")
     }
 
 }

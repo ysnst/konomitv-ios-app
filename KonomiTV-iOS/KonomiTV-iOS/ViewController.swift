@@ -336,6 +336,12 @@ final class ViewController: UIViewController {
         webView.evaluateJavaScript("document.dispatchEvent(new Event('konomi-diagnostics-snapshot'))", completionHandler: nil)
     }
 
+    /// UIKitの背景状態だけを伝える。音声セッションの再取得や再生位置の変更はしない。
+    func notifyBackgroundAudio(_ phase: String) {
+        guard ["capture", "background", "foreground"].contains(phase), isTrustedWatchURL(webView?.url) else { return }
+        webView.evaluateJavaScript("document.dispatchEvent(new CustomEvent('konomi-background-audio', {detail: '\(phase)'}))", completionHandler: nil)
+    }
+
     @objc private func sharePlaybackDiagnostics(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began, presentedViewController == nil else { return }
         do {

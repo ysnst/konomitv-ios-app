@@ -12,7 +12,7 @@ const handler = source.slice(start, end)
     .replace('private setupFullscreenHandler(): void', 'function setupFullscreenHandler()')
     .replaceAll('type?: DPlayerType.FullscreenType', 'type')
     .replaceAll('assert(this.player !== null);', '');
-const bridge = readFileSync('KonomiTV-iOS/KonomiTV-iOS/FullscreenBridge.js', 'utf8');
+const bridge = readFileSync(process.env.BRIDGE_SOURCE || 'KonomiTV-iOS/KonomiTV-iOS/FullscreenBridge.js', 'utf8');
 const html = `<html><head><style>
 *{box-sizing:border-box} body{margin:0;background:#000;color:white;font-family:sans-serif}
 .route-container{height:100vh;border-bottom:21px solid #1e1310;overflow:hidden}
@@ -70,6 +70,21 @@ const html = `<html><head><style>
         return page;
     }
     async function check(name, fn) { await fn(); results.push(name); console.log('PASS ' + name); }
+    async function backgroundFixture(page, options = {}) {
+        await page.evaluate(options => {
+            const video = document.querySelector('video');
+            window.bg = {paused: false, pip: 'inline', source: 'blob:test', calls: 0, reject: false, clock: 0, ...options};
+            for (const [key, get] of Object.entries({paused: () => bg.paused, currentSrc: () => bg.source, readyState: () => 3, webkitPresentationMode: () => bg.pip})) {
+                Object.defineProperty(video, key, {get, configurable: true});
+            }
+            Object.defineProperty(performance, 'now', {value: () => bg.clock, configurable: true});
+            Object.defineProperty(document, 'hidden', {value: false, configurable: true});
+            video.play = () => { bg.calls++; if (bg.reject) return Promise.reject(new Error('NotAllowedError')); bg.paused = false; return Promise.resolve(); };
+            window.bgPhase = detail => document.dispatchEvent(new CustomEvent('konomi-background-audio', {detail}));
+            window.bgPause = () => {bg.paused = true; video.dispatchEvent(new Event('pause'));};
+            window.bgHide = () => {Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'));};
+        }, options);
+    }
     try {
         await check('Unmodified client reproduces unsupported notice', async () => {
             const p = await pageFor({inject: false}); await p.click('#fullscreen');
@@ -197,6 +212,73 @@ const html = `<html><head><style>
             assert.deepEqual(observed.events.map(e => e.event), ['pause', 'visibilitychange', 'snapshot']);
             assert.equal(JSON.stringify(observed).includes('secret'), false);
             assert.equal(Object.keys(observed.events[0].state).length, 13);
+            await p.close();
+        });
+        await check('Real background transition resumes same video once; later pause is respected', async () => {
+            const p = await pageFor(); await backgroundFixture(p);
+            await p.evaluate(() => {bgPhase('capture'); bgPhase('background'); bgPause(); bgHide();});
+            assert.equal(await p.evaluate(() => bg.calls), 1);
+            assert.equal(await p.evaluate(() => bg.paused), false);
+            assert.deepEqual(await p.evaluate(() => diagnostics.filter(e => e.event.startsWith('background-audio-')).map(e => e.event)), ['background-audio-attempt', 'background-audio-started']);
+            await p.evaluate(() => {bgPause(); bgHide(); bgPhase('background');});
+            assert.equal(await p.evaluate(() => bg.calls), 1);
+            assert.equal(await p.evaluate(() => bg.paused), true);
+            await p.close();
+        });
+        await check('No resume for Control Center, initial pause, PiP or cancelled transition', async () => {
+            for (const mode of ['control-center', 'paused', 'pip', 'foreground', 'user-pause-before-background']) {
+                const p = await pageFor(); await backgroundFixture(p, {paused: mode === 'paused', pip: mode === 'pip' ? 'picture-in-picture' : 'inline'});
+                await p.evaluate(mode => {
+                    bgPhase('capture');
+                    if (mode === 'control-center') {bgPause(); bgHide(); return;}
+                    if (mode === 'user-pause-before-background') bgPause();
+                    bgPhase('background');
+                    if (mode === 'foreground') bgPhase('foreground');
+                    bgPause(); bgHide();
+                }, mode);
+                assert.equal(await p.evaluate(() => bg.calls), 0, mode);
+                await p.close();
+            }
+        });
+        await check('Continuing background playback respects the first remote pause', async () => {
+            for (const order of ['background-first', 'hidden-first']) {
+                const p = await pageFor(); await backgroundFixture(p);
+                await p.evaluate(order => {
+                    bgPhase('capture');
+                    if (order === 'background-first') { bgPhase('background'); bgHide(); }
+                    else { bgHide(); bgPhase('background'); }
+                    // 背景で既に継続している場合、その後の停止を自動再開しない。
+                    bgPause(); bgHide(); bgPhase('background');
+                }, order);
+                assert.equal(await p.evaluate(() => bg.calls), 0, order);
+                assert.equal(await p.evaluate(() => bg.paused), true, order);
+                await p.close();
+            }
+        });
+        await check('No resume after source replacement, expiry, PiP entry or interruption', async () => {
+            for (const mode of ['source', 'element', 'expired', 'pip', 'interrupted', 'muted', 'route']) {
+                const p = await pageFor(); await backgroundFixture(p);
+                await p.evaluate(mode => {
+                    bgPhase('capture'); bgPhase('background');
+                    if (mode === 'source') bg.source = 'blob:new-source';
+                    if (mode === 'element') document.querySelector('video').replaceWith(document.createElement('video'));
+                    if (mode === 'expired') bg.clock = 3000;
+                    if (mode === 'pip') bg.pip = 'picture-in-picture';
+                    if (mode === 'interrupted') Object.defineProperty(navigator, 'audioSession', {value: {state: 'interrupted'}, configurable: true});
+                    if (mode === 'muted') document.querySelector('video').muted = true;
+                    if (mode === 'route') history.pushState({}, '', '/login');
+                    bgPause(); bgHide();
+                }, mode);
+                assert.equal(await p.evaluate(() => bg.calls), 0, mode);
+                await p.close();
+            }
+        });
+        await check('Rejected background play is recorded without retry', async () => {
+            const p = await pageFor(); await backgroundFixture(p, {reject: true});
+            await p.evaluate(() => {bgPhase('capture'); bgPhase('background'); bgPause(); bgHide();});
+            await p.evaluate(() => {bgPause(); bgHide();});
+            assert.equal(await p.evaluate(() => bg.calls), 1);
+            assert.equal(await p.evaluate(() => diagnostics.some(e => e.event === 'background-audio-rejected')), true);
             await p.close();
         });
         writeFileSync(resolve('artifacts/verification/browser-results.json'), JSON.stringify({browser: process.env.BROWSER || 'chromium', passed: results}, null, 2));

@@ -7,7 +7,8 @@ enum PlaybackDiagnostics {
     private static let events: Set<String> = [
         "play", "playing", "pause", "waiting", "stalled", "ratechange", "error", "emptied",
         "loadedmetadata", "enterpictureinpicture", "leavepictureinpicture",
-        "webkitpresentationmodechanged", "visibilitychange", "pagehide", "snapshot"
+        "webkitpresentationmodechanged", "visibilitychange", "pagehide", "snapshot",
+        "background-audio-attempt", "background-audio-started", "background-audio-rejected"
     ]
 
     static func record(_ event: String, _ values: [String: Any] = [:]) {
